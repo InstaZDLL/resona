@@ -1,0 +1,24 @@
+[package]
+name = "spytify"
+description = "Spytify desktop app (Slint UI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+# Same feature set as WaveFlow's measured Slint prototype: the software
+# renderer on winit kept the process around 10 MB private memory, which
+# matters for an app left recording overnight.
+slint = { version = "1.18", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-software",
+    "compat-1-18",
+] }
+spytify-core = { path = "../core" }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+
+[build-dependencies]
+slint-build = "1.18"
