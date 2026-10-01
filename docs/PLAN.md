@@ -161,7 +161,7 @@ Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours
 
 Fait côté moteur :
 
-- `settings` : `Settings` en TOML dans `%APPDATA%Spytifysettings.toml` (écriture atomique, fichier abîmé mis de côté, champs manquants par défaut), `recorder_config()`.
+- `settings` : `Settings` en TOML dans `%APPDATA%\Spytify\settings.toml` (écriture atomique, fichier abîmé mis de côté, champs manquants par défaut), `recorder_config()`.
 - `naming` : sous-dossiers (`Folders::Artist`, `ArtistAlbum`, d'après l'artiste de l'album et l'album trouvés par les tags), préfixe (`TrackNumber` « 04 », `OrderNumber` « 001 » dans la session).
 - `library` : index des morceaux déjà présents (parcours récursif au démarrage, clé `Artiste - Titre` sans préfixe ni « (2) »). `ExistingTracks::Skip` (pas écrit du tout, et en option Spotify passe au suivant via SMTC), `Replace`, `KeepBoth`.
 - Pubs : Spotify coupé dans le mélangeur dès qu'une pub est repérée, rétabli ensuite. **À vérifier avec un compte Free** : si la coupure atteint aussi la capture, le début du morceau qui suit la pub pourrait être perdu (le son est rétabli au moment où le changement est remarqué, la coupure est placée plus tôt).
