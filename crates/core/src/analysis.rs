@@ -178,17 +178,22 @@ impl BitAnalysis {
         }
         // A handful of altered samples does not make a processed track.
         if self.clipped == 0 && self.not_24_bit * TOUCHED_RATIO <= self.samples {
-            // Off-grid samples count as "not 16-bit" too: the depth comes
-            // from the others.
-            let depth = if self.not_16_bit == self.not_24_bit {
+            // A sample Spotify touched can land on the 24-bit grid by
+            // chance without being on the 16-bit one: the same tolerance
+            // applies before calling the source 24-bit (287 touched samples
+            // made a 16-bit track read as 24-bit, 2026-10-01).
+            let only_off_16 = self.not_16_bit - self.not_24_bit;
+            let depth = if only_off_16 * TOUCHED_RATIO <= self.samples {
                 16
             } else {
                 24
             };
-            return Fidelity::BitPerfect {
-                depth,
-                touched: self.not_24_bit,
+            let touched = if depth == 16 {
+                self.not_16_bit
+            } else {
+                self.not_24_bit
             };
+            return Fidelity::BitPerfect { depth, touched };
         }
         let (mut loud, mut quiet) = (self.loud, self.quiet);
         if self.block.peak >= LOUD_PEAK {
@@ -496,6 +501,17 @@ mod tests {
             }
         ));
         assert_eq!(analysis.fidelity().lossless_depth(), 16);
+
+        // Touched samples that happen to land on the 24-bit grid (×0.75 of
+        // a 16-bit value is a whole number of 24-bit steps): still 16-bit.
+        let mut on_24 = clean.clone();
+        for s in on_24.iter_mut().step_by(25_000) {
+            *s *= 0.75;
+        }
+        assert!(matches!(
+            analyse(&on_24).fidelity(),
+            Fidelity::BitPerfect { depth: 16, .. }
+        ));
 
         // Spotify's 24-bit path: one sample in ten nudged by a quarter step,
         // at every level (quiet passages included, unlike a limiter). The

@@ -369,7 +369,11 @@ fn encode(
     // Encoded and tagged next to the WAV, then moved into place: the
     // output folder never shows a half-written file.
     let format = config.format;
-    let staged = job.wav.with_extension(format.extension());
+    // Not `with_extension`: for a WAV output that would be the capture
+    // file itself, truncated while it is being read.
+    let staged = job
+        .wav
+        .with_extension(format!("out.{}", format.extension()));
     let source_bits = fidelity.lossless_depth();
     match format {
         OutputFormat::Flac { depth } => {
