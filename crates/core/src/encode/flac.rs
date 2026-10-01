@@ -9,17 +9,13 @@ use flacenc::error::{SourceError, Verify};
 use flacenc::source::{Fill, Source};
 use hound::{SampleFormat, WavReader};
 
-use crate::analysis::quantize;
+use super::Quantizer;
 use crate::{Error, Result};
 
 /// Encodes an intermediate float WAV (see [`super::wav::CaptureWav`]) to
-/// FLAC at `bits` bits per sample (16 or 24).
-///
-/// Samples are rounded, not dithered: the caller picks `bits` from
-/// [`crate::analysis::BitAnalysis::effective_depth`], at which the rounding
-/// is exact.
-pub fn encode_wav_to_flac(src: &Path, dst: &Path, bits: u8) -> Result<()> {
-    debug_assert!(bits == 16 || bits == 24);
+/// FLAC at the quantizer's depth (16 or 24 bits).
+pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Result<()> {
+    debug_assert!(quantizer.bits() == 16 || quantizer.bits() == 24);
     let reader = WavReader::open(src)?;
     let spec = reader.spec();
     if spec.sample_format != SampleFormat::Float || spec.bits_per_sample != 32 {
@@ -31,7 +27,7 @@ pub fn encode_wav_to_flac(src: &Path, dst: &Path, bits: u8) -> Result<()> {
         .map_err(|(_, e)| Error::Flac(e.to_string()))?;
     let source = WavSource {
         reader,
-        bits,
+        quantizer,
         buffer: Vec::new(),
     };
     let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
@@ -49,7 +45,7 @@ pub fn encode_wav_to_flac(src: &Path, dst: &Path, bits: u8) -> Result<()> {
 /// memory as raw PCM.
 struct WavSource {
     reader: WavReader<BufReader<File>>,
-    bits: u8,
+    quantizer: Quantizer,
     buffer: Vec<i32>,
 }
 
@@ -59,7 +55,7 @@ impl Source for WavSource {
     }
 
     fn bits_per_sample(&self) -> usize {
-        usize::from(self.bits)
+        usize::from(self.quantizer.bits())
     }
 
     fn sample_rate(&self) -> usize {
@@ -72,11 +68,10 @@ impl Source for WavSource {
         dest: &mut F,
     ) -> Result<usize, SourceError> {
         let channels = self.channels();
-        let bits = self.bits;
         self.buffer.clear();
         for sample in self.reader.samples::<f32>().take(block_size * channels) {
             let sample = sample.map_err(SourceError::from_io_error)?;
-            self.buffer.push(quantize(sample, bits));
+            self.buffer.push(self.quantizer.quantize(sample));
         }
         dest.fill_interleaved(&self.buffer)?;
         Ok(self.buffer.len() / channels)
@@ -106,7 +101,7 @@ mod tests {
         wav.write(&samples).unwrap();
         wav.finalize().unwrap();
 
-        encode_wav_to_flac(&wav_path, &flac_path, 24).unwrap();
+        encode_wav_to_flac(&wav_path, &flac_path, Quantizer::new(24, 24)).unwrap();
         let bytes = std::fs::read(&flac_path).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(&bytes[..4], b"fLaC");

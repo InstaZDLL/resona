@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
     use spytify_core::analysis::{self, BitAnalysis};
     use spytify_core::audio_setup;
     use spytify_core::capture::{CaptureConfig, ProcessCapture};
-    use spytify_core::encode::{flac, wav::CaptureWav};
+    use spytify_core::encode::{Quantizer, flac, wav::CaptureWav};
     use spytify_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
     use spytify_core::spotify::process::SpotifyProcesses;
 
@@ -186,7 +186,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    flac::encode_wav_to_flac(&intermediate, &output, bits)?;
+    flac::encode_wav_to_flac(&intermediate, &output, Quantizer::new(bits, bits))?;
     if std::env::var_os("SPYTIFY_KEEP_WAV").is_some() {
         println!("kept the raw float capture: {}", intermediate.display());
     } else {

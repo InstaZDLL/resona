@@ -44,11 +44,72 @@ pub enum BitDepth {
     Bits24,
 }
 
+impl BitDepth {
+    /// Bits to write for a capture that holds `source_bits` (see
+    /// [`crate::analysis::Fidelity::lossless_depth`]).
+    pub fn resolve(self, source_bits: u8) -> u8 {
+        match self {
+            Self::Auto => source_bits,
+            Self::Bits16 => 16,
+            Self::Bits24 => 24,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
-    Wav,
+    Wav { depth: BitDepth },
     Mp3 { kbps: u32 },
     Flac { depth: BitDepth },
+}
+
+impl OutputFormat {
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Wav { .. } => "wav",
+            Self::Mp3 { .. } => "mp3",
+            Self::Flac { .. } => "flac",
+        }
+    }
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    /// `flac`, `flac16`, `flac24`, `wav`, `wav16`, `wav24`, `mp3` (320 kbps)
+    /// or `mp3:<kbps>`.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let depth = |suffix: &str| match suffix {
+            "" => Ok(BitDepth::Auto),
+            "16" => Ok(BitDepth::Bits16),
+            "24" => Ok(BitDepth::Bits24),
+            other => Err(format!("unknown bit depth {other:?}")),
+        };
+        let value = value.to_ascii_lowercase();
+        if let Some(rest) = value.strip_prefix("flac") {
+            Ok(Self::Flac {
+                depth: depth(rest)?,
+            })
+        } else if let Some(rest) = value.strip_prefix("wav") {
+            Ok(Self::Wav {
+                depth: depth(rest)?,
+            })
+        } else if let Some(rest) = value.strip_prefix("mp3") {
+            let kbps = match rest.strip_prefix(':') {
+                Some(kbps) => kbps.parse().map_err(|_| format!("bad bitrate {kbps:?}"))?,
+                None if rest.is_empty() => 320,
+                None => return Err(format!("unknown format {value:?}")),
+            };
+            if !matches!(kbps, 128 | 160 | 192 | 256 | 320) {
+                return Err(format!(
+                    "unsupported MP3 bitrate {kbps} (128, 160, 192, 256, 320)"
+                ));
+            }
+            Ok(Self::Mp3 { kbps })
+        } else {
+            Err(format!("unknown format {value:?} (flac, wav, mp3)"))
+        }
+    }
 }
 
 /// Keeps the front-left / front-right pair of an interleaved stream of
@@ -85,6 +146,35 @@ mod tests {
         let (stereo, other_peak) = front_stereo(&frames, 8);
         assert_eq!(stereo, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(other_peak, 0.6);
+    }
+
+    #[test]
+    fn parses_output_formats() {
+        let parse = |s: &str| s.parse::<OutputFormat>();
+        assert_eq!(
+            parse("FLAC"),
+            Ok(OutputFormat::Flac {
+                depth: BitDepth::Auto
+            })
+        );
+        assert_eq!(
+            parse("flac16"),
+            Ok(OutputFormat::Flac {
+                depth: BitDepth::Bits16
+            })
+        );
+        assert_eq!(
+            parse("wav24"),
+            Ok(OutputFormat::Wav {
+                depth: BitDepth::Bits24
+            })
+        );
+        assert_eq!(parse("mp3"), Ok(OutputFormat::Mp3 { kbps: 320 }));
+        assert_eq!(parse("mp3:160"), Ok(OutputFormat::Mp3 { kbps: 160 }));
+        assert!(parse("mp3:300").is_err());
+        assert!(parse("ogg").is_err());
+        assert_eq!(BitDepth::Auto.resolve(24), 24);
+        assert_eq!(BitDepth::Bits16.resolve(24), 16);
     }
 
     #[test]

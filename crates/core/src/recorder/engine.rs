@@ -19,8 +19,9 @@ use super::splitter::{Action, Change, Ended, Splitter};
 use crate::analysis::{BitAnalysis, Fidelity};
 use crate::audio_setup::{self, OutputDevice};
 use crate::capture::{CaptureConfig, Packet, ProcessCapture};
-use crate::encode::{flac, wav::CaptureWav};
+use crate::encode::{Quantizer, flac, mp3, wav, wav::CaptureWav};
 use crate::format::CAPTURE_SAMPLE_RATE;
+use crate::format::OutputFormat;
 use crate::metadata::deezer::DeezerClient;
 use crate::metadata::tags::TrackTags;
 use crate::metadata::{self, TagsOutcome};
@@ -47,6 +48,9 @@ pub struct RecorderConfig {
     pub keep_partial: bool,
     /// Tracks shorter than this are dropped (jingles, accidental plays).
     pub min_duration: Duration,
+    /// See [`crate::format::SpotifyQuality::default_output`] for the
+    /// natural choice per Spotify tier.
+    pub format: OutputFormat,
 }
 
 #[derive(Debug, Clone)]
@@ -364,8 +368,20 @@ fn encode(
     }
     // Encoded and tagged next to the WAV, then moved into place: the
     // output folder never shows a half-written file.
-    let staged = job.wav.with_extension("flac");
-    flac::encode_wav_to_flac(&job.wav, &staged, fidelity.flac_depth())?;
+    let format = config.format;
+    let staged = job.wav.with_extension(format.extension());
+    let source_bits = fidelity.lossless_depth();
+    match format {
+        OutputFormat::Flac { depth } => {
+            let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
+            flac::encode_wav_to_flac(&job.wav, &staged, quantizer)?;
+        }
+        OutputFormat::Wav { depth } => {
+            let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
+            wav::export_wav(&job.wav, &staged, quantizer)?;
+        }
+        OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps)?,
+    }
     let (tags, outcome) = match deezer {
         Some(client) => metadata::tags_for(client, &job.ended.track),
         None => (
@@ -373,8 +389,11 @@ fn encode(
             TagsOutcome::Unavailable("no HTTP client".into()),
         ),
     };
-    let tagged = tags.write_flac(&staged);
-    let path = naming::unique_path(&config.output_dir, &naming::file_name(&title, "flac"));
+    let tagged = tags.write(&staged, format);
+    let path = naming::unique_path(
+        &config.output_dir,
+        &naming::file_name(&title, format.extension()),
+    );
     std::fs::rename(&staged, &path)?;
     tagged?;
     Ok(RecorderEvent::Saved {

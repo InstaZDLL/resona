@@ -10,6 +10,7 @@ crossbeam-channel = "0.5.17"
 flacenc = "0.5.1"
 hound = "3.5.1"
 lofty = "0.25"
+mp3lame-encoder = "0.2.5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
