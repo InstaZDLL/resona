@@ -38,3 +38,19 @@ impl CaptureWav {
         Ok(self.writer.finalize()?)
     }
 }
+
+/// Writes an intermediate float WAV as integer PCM WAV at the quantizer's
+/// depth: the lossless output for players without FLAC.
+pub fn export_wav(src: &Path, dst: &Path, mut quantizer: super::Quantizer) -> Result<()> {
+    let mut reader = hound::WavReader::open(src)?;
+    let spec = WavSpec {
+        bits_per_sample: u16::from(quantizer.bits()),
+        sample_format: SampleFormat::Int,
+        ..reader.spec()
+    };
+    let mut writer = WavWriter::create(dst, spec)?;
+    for sample in reader.samples::<f32>() {
+        writer.write_sample(quantizer.quantize(sample?))?;
+    }
+    Ok(writer.finalize()?)
+}

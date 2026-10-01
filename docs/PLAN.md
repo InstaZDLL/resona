@@ -120,7 +120,15 @@ Porter `Watcher.cs`, `Recorder.cs` et `AudioSessions/AudioThrottler.cs` :
 - Suppression du silence au début et à la fin (`SilenceAnalyzer`), durée minimale, morceaux déjà enregistrés ignorés, numéros d'ordre, nommage et dossiers (`Native/FileManager.cs`, tests `FileManagerTests.cs`).
 - Pubs : selon le point 4 de la phase 0.
 
-### Phase 3 — Formats de sortie
+### Phase 3 — Formats de sortie (fait)
+
+- `RecorderConfig::format` (`OutputFormat`) : `Flac { depth }`, `Wav { depth }` (PCM entier), `Mp3 { kbps }` (CBR 128/160/192/256/320). `BitDepth::Auto` reprend la profondeur que la capture contient (`Fidelity::lossless_depth`).
+- `encode::Quantizer` : arrondi exact à profondeur égale, **dither TPDF** quand on réduit (source 24 bits écrite en 16).
+- `encode::mp3` : LAME via `mp3lame-encoder` (compilé depuis les sources, sans DLL), qualité maximale ; l'en-tête **Info** de LAME est réécrit en tête de fichier, pour la lecture sans blanc entre morceaux.
+- Tags : Vorbis pour le FLAC, **ID3v2** pour MP3 et WAV (`TrackTags::write`), pochette comprise.
+- Exemple `record --format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>`.
+
+Plan initial :
 
 - WAV : `hound`.
 - MP3 CBR 128 à 320 kbps : `mp3lame-encoder` (LAME, comme la version C#).

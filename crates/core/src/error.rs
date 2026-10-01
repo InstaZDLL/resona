@@ -14,6 +14,9 @@ pub enum Error {
     #[error("FLAC encoder error: {0}")]
     Flac(String),
 
+    #[error("MP3 encoder error: {0}")]
+    Mp3(String),
+
     #[error("tag writing failed: {0}")]
     Tags(String),
 

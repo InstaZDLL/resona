@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cargo run -p spytify-core --example record -- <output dir> [minutes] [--keep-partial]
+//!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
 #[cfg(windows)]
@@ -10,6 +11,7 @@ fn main() -> anyhow::Result<()> {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
+    use spytify_core::format::OutputFormat;
     use spytify_core::recorder::engine::{Recorder, RecorderConfig};
 
     tracing_subscriber::fmt()
@@ -17,6 +19,12 @@ fn main() -> anyhow::Result<()> {
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let keep_partial = args.iter().any(|a| a == "--keep-partial");
+    let format: OutputFormat = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--format="))
+        .unwrap_or("flac")
+        .parse()
+        .map_err(anyhow::Error::msg)?;
     let mut positional = args.iter().filter(|a| !a.starts_with("--"));
     let output_dir = PathBuf::from(positional.next().map_or("recordings", String::as_str));
     let minutes: u64 = positional
@@ -29,9 +37,10 @@ fn main() -> anyhow::Result<()> {
         output_dir: output_dir.clone(),
         keep_partial,
         min_duration: Duration::from_secs(10),
+        format,
     })?;
     println!(
-        "recording into {} for {minutes} min{}",
+        "recording into {} as {format:?} for {minutes} min{}",
         output_dir.display(),
         if keep_partial {
             " (keeping partial tracks)"

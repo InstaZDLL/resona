@@ -6,9 +6,10 @@ use lofty::config::WriteOptions;
 use lofty::ogg::OggPictureStorage;
 use lofty::ogg::tag::VorbisComments;
 use lofty::picture::{MimeType, Picture, PictureType};
-use lofty::tag::{Accessor, TagExt};
+use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagExt, TagItem, TagType};
 
 use super::deezer;
+use crate::format::OutputFormat;
 use crate::spotify::state::Track;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -160,6 +161,63 @@ impl TrackTags {
             .save_to_path(path, WriteOptions::default())
             .map_err(|e| crate::Error::Tags(e.to_string()))
     }
+
+    /// Tags the file in the format it was encoded to: Vorbis comments for
+    /// FLAC, ID3v2 for MP3 and WAV.
+    pub fn write(&self, path: &Path, format: OutputFormat) -> crate::Result<()> {
+        match format {
+            OutputFormat::Flac { .. } => self.write_flac(path),
+            OutputFormat::Mp3 { .. } | OutputFormat::Wav { .. } => self.write_id3v2(path),
+        }
+    }
+
+    /// ID3v2 through lofty's generic tag: the file was just encoded and
+    /// holds no other tag, so there are no foreign fields to preserve.
+    pub fn to_id3v2(&self) -> Tag {
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.set_title(self.title.clone());
+        tag.set_artist(self.artist.clone());
+        if let Some(album) = &self.album {
+            tag.set_album(album.clone());
+        }
+        let mut put = |key: ItemKey, value: Option<String>| {
+            if let Some(value) = value {
+                tag.insert_text(key, value);
+            }
+        };
+        put(ItemKey::AlbumArtist, self.album_artist.clone());
+        put(ItemKey::RecordingDate, self.date.clone());
+        put(ItemKey::Isrc, self.isrc.clone());
+        put(ItemKey::Label, self.label.clone());
+        put(
+            ItemKey::TrackNumber,
+            self.track_number.map(|n| n.to_string()),
+        );
+        put(ItemKey::TrackTotal, self.track_total.map(|n| n.to_string()));
+        put(ItemKey::DiscNumber, self.disc_number.map(|n| n.to_string()));
+        put(
+            ItemKey::EncoderSoftware,
+            Some(concat!("Spytify ", env!("CARGO_PKG_VERSION")).to_owned()),
+        );
+        for genre in &self.genres {
+            tag.push(TagItem::new(ItemKey::Genre, ItemValue::Text(genre.clone())));
+        }
+        if let Some(cover) = &self.cover {
+            tag.push_picture(
+                Picture::unchecked(cover.data.clone())
+                    .pic_type(PictureType::CoverFront)
+                    .mime_type(cover.mime.clone())
+                    .build(),
+            );
+        }
+        tag
+    }
+
+    pub fn write_id3v2(&self, path: &Path) -> crate::Result<()> {
+        self.to_id3v2()
+            .save_to_path(path, WriteOptions::default())
+            .map_err(|e| crate::Error::Tags(e.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -225,7 +283,7 @@ mod tests {
         let mut writer = CaptureWav::create(&wav).unwrap();
         writer.write(&[0.25; 8_820]).unwrap();
         writer.finalize().unwrap();
-        encode_wav_to_flac(&wav, &flac, 16).unwrap();
+        encode_wav_to_flac(&wav, &flac, crate::encode::Quantizer::new(16, 16)).unwrap();
 
         let mut tags = TrackTags::from_spotify(&spotify_track());
         tags.genres = vec!["Electro".into()];
@@ -245,6 +303,41 @@ mod tests {
         );
         assert_eq!(tag.get_string(ItemKey::AlbumArtist), Some("Daft Punk"));
         assert_eq!(tag.track(), Some(4));
+        assert_eq!(tag.pictures().len(), 1);
+    }
+
+    #[test]
+    fn writes_and_reads_back_an_mp3() {
+        use crate::encode::{mp3::encode_wav_to_mp3, wav::CaptureWav};
+        use lofty::file::TaggedFileExt;
+        use lofty::tag::ItemKey;
+
+        let dir = std::env::temp_dir().join(format!("spytify-id3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (wav, mp3) = (dir.join("t.wav"), dir.join("t.mp3"));
+        let mut writer = CaptureWav::create(&wav).unwrap();
+        writer.write(&[0.25; 88_200]).unwrap();
+        writer.finalize().unwrap();
+        encode_wav_to_mp3(&wav, &mp3, 192).unwrap();
+
+        let mut tags = TrackTags::from_spotify(&spotify_track());
+        tags.genres = vec!["Electro".into(), "Dance".into()];
+        tags.isrc = Some("GBDUW0000059".into());
+        tags.cover = Cover::from_bytes(vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]);
+        tags.write(&mp3, OutputFormat::Mp3 { kbps: 192 }).unwrap();
+
+        let tagged = lofty::read_from_path(&mp3).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let tag = tagged.primary_tag().unwrap();
+        assert_eq!(tag.tag_type(), TagType::Id3v2);
+        assert_eq!(
+            tag.title().as_deref(),
+            Some("Harder, Better, Faster, Stronger")
+        );
+        assert_eq!(tag.get_string(ItemKey::AlbumArtist), Some("Daft Punk"));
+        assert_eq!(tag.get_string(ItemKey::Isrc), Some("GBDUW0000059"));
+        assert_eq!(tag.track(), Some(4));
+        assert_eq!(tag.get_strings(ItemKey::Genre).count(), 2);
         assert_eq!(tag.pictures().len(), 1);
     }
 }

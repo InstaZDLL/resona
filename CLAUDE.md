@@ -26,7 +26,7 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 
 ## Layout
 
-- `crates/core` (`spytify-core`) — engine, no UI: `spotify` (process, window title, SMTC → `state::Status` → `monitor` events), `capture` (WASAPI process loopback thread), `analysis` (bit-transparency), `encode` (intermediate WAV + FLAC), `format`. Windows-only modules are behind `#[cfg(windows)]` so the crate still builds and tests elsewhere.
+- `crates/core` (`spytify-core`) — engine, no UI: `spotify` (process, window title, SMTC → `state::Status` → `monitor` events), `capture` (WASAPI process loopback thread), `analysis` (bit-transparency), `encode` (intermediate float WAV, then FLAC / WAV / MP3; `Quantizer` dithers only when reducing depth), `format`. Windows-only modules are behind `#[cfg(windows)]` so the crate still builds and tests elsewhere.
 - Decision logic is kept pure and unit-tested (`spotify::title`, `spotify::state`, `analysis`); Windows modules only gather inputs. Keep new logic on the pure side.
 - `metadata/` — `deezer` (blocking client, no key), `lookup` (pure: a Deezer hit is used only if title, artist and duration all agree), `tags` (`TrackTags`, written through lofty's concrete `VorbisComments`). Tags are best-effort: a failed lookup keeps Spotify's own details, never fails a recording.
 - `recorder/` — `splitter` (pure: holds audio back 3 s and places each change at the frame it happened), `clock`, `naming`, `engine` (Windows: capture + monitor + splitter + FLAC encoder thread).

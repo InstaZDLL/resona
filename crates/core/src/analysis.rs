@@ -75,8 +75,9 @@ pub enum Fidelity {
 }
 
 impl Fidelity {
-    /// FLAC bits per sample that keep everything the capture holds.
-    pub fn flac_depth(self) -> u8 {
+    /// Bits per sample that keep everything the capture holds, for the
+    /// lossless outputs (FLAC, WAV).
+    pub fn lossless_depth(self) -> u8 {
         match self {
             Self::BitPerfect { depth, .. } => depth,
             Self::Silent => 16,
@@ -494,7 +495,7 @@ mod tests {
                 touched: 1..=4
             }
         ));
-        assert_eq!(analysis.fidelity().flac_depth(), 16);
+        assert_eq!(analysis.fidelity().lossless_depth(), 16);
 
         // Spotify's 24-bit path: one sample in ten nudged by a quarter step,
         // at every level (quiet passages included, unlike a limiter). The
