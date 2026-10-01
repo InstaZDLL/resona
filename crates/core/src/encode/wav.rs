@@ -54,3 +54,28 @@ pub fn export_wav(src: &Path, dst: &Path, mut quantizer: super::Quantizer) -> Re
     }
     Ok(writer.finalize()?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encode::Quantizer;
+
+    #[test]
+    fn exports_integer_pcm() {
+        let dir = std::env::temp_dir().join(format!("spytify-wav-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (capture, out) = (dir.join("track.wav"), dir.join("track.out.wav"));
+        let values = [1234, -32_768, 32_767, 0];
+        let samples: Vec<f32> = values.iter().map(|&v| v as f32 / 32_768.0).collect();
+        let mut writer = CaptureWav::create(&capture).unwrap();
+        writer.write(&samples).unwrap();
+        writer.finalize().unwrap();
+
+        export_wav(&capture, &out, Quantizer::new(16, 16)).unwrap();
+        let mut reader = hound::WavReader::open(&out).unwrap();
+        assert_eq!(reader.spec().bits_per_sample, 16);
+        let read: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(read, values.map(|v| v as i16));
+    }
+}
