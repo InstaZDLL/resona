@@ -18,7 +18,40 @@ pub struct BitAnalysis {
     not_24_bit: u64,
     clipped: u64,
     peak: f32,
+    /// Sum of the distances to the 24-bit grid, in 24-bit steps.
+    residual_24: f64,
 }
+
+/// How faithful a capture is to what Spotify decoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fidelity {
+    /// Every sample is the source's integer value: a real lossless rip.
+    BitPerfect { depth: u8 },
+    /// Off the 24-bit grid by a small fraction of a step on some samples,
+    /// as Spotify's own 24-bit path does (see `docs/PLAN.md`, point 3 bis).
+    /// Rounding to 24 bits restores the source except on exact half steps.
+    NearTransparent,
+    /// Gain, resampling or effects changed the signal.
+    Processed,
+    /// Digital silence: nothing to judge.
+    Silent,
+}
+
+impl Fidelity {
+    /// FLAC bits per sample that keep everything the capture holds.
+    pub fn flac_depth(self) -> u8 {
+        match self {
+            Self::BitPerfect { depth } => depth,
+            Self::Silent => 16,
+            Self::NearTransparent | Self::Processed => 24,
+        }
+    }
+}
+
+/// Mean distance to the 24-bit grid separating the two non-perfect cases:
+/// measured around 0.02 to 0.09 step for Spotify's 24-bit path, 0.25 (a
+/// uniform spread) for anything processed.
+const NEAR_TRANSPARENT_RESIDUAL: f64 = 0.15;
 
 impl BitAnalysis {
     pub fn feed(&mut self, samples: &[f32]) {
@@ -33,6 +66,8 @@ impl BitAnalysis {
             // comparisons have no rounding slack to account for.
             let scaled_24 = sample * SCALE_24;
             if scaled_24 != scaled_24.round() {
+                let exact = f64::from(sample) * f64::from(SCALE_24);
+                self.residual_24 += (exact - exact.round()).abs();
                 self.not_24_bit += 1;
                 self.not_16_bit += 1;
                 continue;
@@ -78,6 +113,21 @@ impl BitAnalysis {
     /// The capture is an exact image of an integer PCM stream.
     pub fn is_bit_transparent(&self) -> bool {
         !self.is_silent() && self.not_24_bit == 0 && self.clipped == 0
+    }
+
+    pub fn fidelity(&self) -> Fidelity {
+        if self.is_silent() {
+            return Fidelity::Silent;
+        }
+        if let Some(depth) = self.effective_depth() {
+            return Fidelity::BitPerfect { depth };
+        }
+        let mean_residual = self.residual_24 / self.samples as f64;
+        if self.clipped == 0 && mean_residual < NEAR_TRANSPARENT_RESIDUAL {
+            Fidelity::NearTransparent
+        } else {
+            Fidelity::Processed
+        }
     }
 
     /// Smallest integer depth that holds the capture without loss, or
@@ -333,6 +383,30 @@ mod tests {
         let r = grid_residual(&processed);
         assert!(r.off_grid_24 > 0.5);
         assert!(r.mean_lsb_16 > 0.1, "{r:?}");
+    }
+
+    #[test]
+    fn fidelity_classes() {
+        let clean: Vec<f32> = sixteen_bit_signal()
+            .iter()
+            .map(|&n| n as f32 / SCALE_16)
+            .collect();
+        assert_eq!(
+            analyse(&clean).fidelity(),
+            Fidelity::BitPerfect { depth: 16 }
+        );
+
+        // Spotify's 24-bit path: one sample in ten nudged by a quarter step.
+        let nudged: Vec<f32> = clean
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| if i % 10 == 0 { s + 0.25 / SCALE_24 } else { s })
+            .collect();
+        assert_eq!(analyse(&nudged).fidelity(), Fidelity::NearTransparent);
+
+        let processed: Vec<f32> = clean.iter().map(|s| s * 0.9).collect();
+        assert_eq!(analyse(&processed).fidelity(), Fidelity::Processed);
+        assert_eq!(analyse(&[0.0; 64]).fidelity(), Fidelity::Silent);
     }
 
     #[test]

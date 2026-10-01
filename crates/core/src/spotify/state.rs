@@ -70,7 +70,9 @@ pub struct SmtcView<'a> {
 /// One addition: a paused track keeps its identity. Spotify resets the
 /// window title to `Spotify Premium` on pause, but SMTC keeps the track,
 /// so pausing `previous` reports it as not playing instead of a change of
-/// track (which would split the recording in two).
+/// track (which would split the recording in two). This wins over
+/// `audio_active`: Spotify fades out over the first poll of a pause, and
+/// that tail of sound once passed for an ad (measured 2026-10-01).
 pub fn classify(
     window_title: Option<&str>,
     smtc: Option<&SmtcView>,
@@ -85,11 +87,13 @@ pub fn classify(
             (true, Content::Track(Track { title, details }))
         }
         TitleState::Other(other) if title::is_ad_title(&other) || sound => (true, Content::Ad),
-        TitleState::Idle if sound => (true, Content::Ad),
         TitleState::Idle => match (previous, smtc) {
-            (Content::Track(track), Some(smtc)) if smtc_describes(smtc, &track.title) => {
+            (Content::Track(track), Some(smtc))
+                if !smtc.playing && smtc_describes(smtc, &track.title) =>
+            {
                 (false, previous.clone())
             }
+            _ if sound => (true, Content::Ad),
             _ => (false, Content::Nothing),
         },
         TitleState::Other(_) => (false, Content::Nothing),
@@ -104,7 +108,11 @@ pub fn classify(
 /// The SMTC title is the full one (`Song (Live)`), the parsed title only
 /// its first part.
 fn smtc_describes(smtc: &SmtcView, title: &TrackTitle) -> bool {
-    smtc.title
+    smtc_title_matches(smtc.title, title)
+}
+
+pub fn smtc_title_matches(smtc_title: &str, title: &TrackTitle) -> bool {
+    smtc_title
         .to_lowercase()
         .starts_with(&title.title.to_lowercase())
 }
@@ -269,6 +277,33 @@ mod tests {
             diff(&paused, &resumed),
             [Event::PlayStateChanged { playing: true }]
         );
+    }
+
+    #[test]
+    fn fade_out_at_pause_is_not_an_ad() {
+        // Observed: the poll right after pausing still hears the fade-out.
+        let playing = classify(Some("A - One"), Some(&smtc("One", true)), false, &NOTHING);
+        let pausing = classify(
+            Some("Spotify Premium"),
+            Some(&smtc("One", false)),
+            true,
+            &playing.content,
+        );
+        assert!(!pausing.playing);
+        assert_eq!(pausing.content, playing.content);
+    }
+
+    #[test]
+    fn idle_title_while_smtc_still_plays_the_track_is_an_ad() {
+        // An ad on the Free tier, SMTC not updated yet: still an ad.
+        let playing = classify(Some("A - One"), Some(&smtc("One", true)), false, &NOTHING);
+        let ad = classify(
+            Some("Spotify Free"),
+            Some(&smtc("One", true)),
+            true,
+            &playing.content,
+        );
+        assert_eq!(ad.content, Content::Ad);
     }
 
     #[test]

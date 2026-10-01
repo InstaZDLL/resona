@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender};
 use wasapi::{AudioClient, Direction, SampleType, StreamMode, WaveFormat};
@@ -29,6 +30,9 @@ pub struct Packet {
     /// multichannel. Non-zero means Spotify spread the music over them and
     /// the front pair alone is not the whole signal.
     pub other_channels_peak: f32,
+    /// When the packet was read: maps frames to wall-clock time
+    /// ([`crate::recorder::clock::FrameClock`]).
+    pub received_at: Instant,
 }
 
 pub struct ProcessCapture {
@@ -172,6 +176,7 @@ fn capture_thread(
                 samples,
                 discontinuity: info.flags.data_discontinuity,
                 other_channels_peak,
+                received_at: Instant::now(),
             };
             if packets.send(packet).is_err() {
                 // Receiver gone: nobody is recording any more.
