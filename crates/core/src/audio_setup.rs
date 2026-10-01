@@ -180,10 +180,12 @@ fn enhancements_active(device_id: &str) -> Option<bool> {
     Some(installed && !disabled)
 }
 
-/// Volume and mute state of every audio session owned by `pids` on the
-/// default render device. Needs COM (MTA).
-pub fn session_volumes(pids: &HashSet<u32>) -> Result<Vec<SessionVolume>> {
-    let mut volumes = Vec::new();
+/// Calls `visit` with the volume control of every audio session owned by
+/// `pids` on the default render device. Needs COM (MTA).
+fn for_each_session(
+    pids: &HashSet<u32>,
+    mut visit: impl FnMut(u32, &ISimpleAudioVolume) -> windows::core::Result<()>,
+) -> Result<()> {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
@@ -199,16 +201,32 @@ pub fn session_volumes(pids: &HashSet<u32>) -> Result<Vec<SessionVolume>> {
             else {
                 continue;
             };
-            if !pids.contains(&pid) {
-                continue;
+            if pids.contains(&pid) {
+                visit(pid, &control.cast::<ISimpleAudioVolume>()?)?;
             }
-            let volume = control.cast::<ISimpleAudioVolume>()?;
-            volumes.push(SessionVolume {
-                pid,
-                volume: volume.GetMasterVolume()?,
-                muted: volume.GetMute()?.as_bool(),
-            });
         }
     }
+    Ok(())
+}
+
+/// Volume and mute state of Spotify's audio sessions.
+pub fn session_volumes(pids: &HashSet<u32>) -> Result<Vec<SessionVolume>> {
+    let mut volumes = Vec::new();
+    for_each_session(pids, |pid, volume| {
+        volumes.push(SessionVolume {
+            pid,
+            volume: unsafe { volume.GetMasterVolume()? },
+            muted: unsafe { volume.GetMute()? }.as_bool(),
+        });
+        Ok(())
+    })?;
     Ok(volumes)
+}
+
+/// Mutes or unmutes Spotify in the Windows mixer, as during ads. The
+/// recording does not depend on it: ads are not recorded either way.
+pub fn set_spotify_muted(pids: &HashSet<u32>, muted: bool) -> Result<()> {
+    for_each_session(pids, |_, volume| unsafe {
+        volume.SetMute(muted, std::ptr::null())
+    })
 }

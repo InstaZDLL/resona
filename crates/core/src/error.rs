@@ -17,6 +17,9 @@ pub enum Error {
     #[error("MP3 encoder error: {0}")]
     Mp3(String),
 
+    #[error("settings: {0}")]
+    Settings(String),
+
     #[error("tag writing failed: {0}")]
     Tags(String),
 

@@ -155,7 +155,18 @@ Plan initial :
 - Reprendre de `WaveFlow/src-tauri/crates/core` : `metadata/deezer.rs`, `metadata/lastfm.rs`, `metadata/name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs` (écriture fiable sous Windows : nouvelles tentatives si un antivirus verrouille le fichier). Copier les modules plutôt que dépendre de `waveflow-core`, qui embarque sqlx, symphonia, libopus et wasmtime.
 - Reprendre les cas de `MapperID3Tests.cs`, `LastFMAPITests.cs`.
 
-### Phase 5 — Interface Slint
+### Phase 5 — Interface Slint (en cours)
+
+Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours, bouton, liste des morceaux de la session avec leur qualité) et **panneau latéral de réglages**. Options reprises de la version C# : organisation des fichiers, morceaux déjà enregistrés, pubs. Abandonnées : périphérique audio et câble virtuel (capture par processus), identifiants API Spotify (Deezer), minuterie.
+
+Fait côté moteur :
+
+- `settings` : `Settings` en TOML dans `%APPDATA%Spytifysettings.toml` (écriture atomique, fichier abîmé mis de côté, champs manquants par défaut), `recorder_config()`.
+- `naming` : sous-dossiers (`Folders::Artist`, `ArtistAlbum`, d'après l'artiste de l'album et l'album trouvés par les tags), préfixe (`TrackNumber` « 04 », `OrderNumber` « 001 » dans la session).
+- `library` : index des morceaux déjà présents (parcours récursif au démarrage, clé `Artiste - Titre` sans préfixe ni « (2) »). `ExistingTracks::Skip` (pas écrit du tout, et en option Spotify passe au suivant via SMTC), `Replace`, `KeepBoth`.
+- Pubs : Spotify coupé dans le mélangeur dès qu'une pub est repérée, rétabli ensuite. **À vérifier avec un compte Free** : si la coupure atteint aussi la capture, le début du morceau qui suit la pub pourrait être perdu (le son est rétabli au moment où le changement est remarqué, la coupure est placée plus tôt).
+
+Plan initial :
 
 Porter `frmEspionSpotify` : bouton d'enregistrement, console de logs, réglages (dossier, format, débit, qualité Spotify, profondeur FLAC, durée minimale, options sur les pubs, langue), réduction dans la zone de notification.
 
