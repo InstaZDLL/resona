@@ -20,7 +20,37 @@ pub struct BitAnalysis {
     peak: f32,
     /// Sum of the distances to the 24-bit grid, in 24-bit steps.
     residual_24: f64,
+    /// Off-grid samples split by how loud their 10 ms block is, to spot a
+    /// limiter: it only touches blocks near full scale.
+    block: Block,
+    loud: Share,
+    quiet: Share,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Block {
+    samples: u32,
+    off: u32,
+    peak: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Share {
+    samples: u64,
+    off: u64,
+}
+
+impl Share {
+    fn add(&mut self, block: Block) {
+        self.samples += u64::from(block.samples);
+        self.off += u64::from(block.off);
+    }
+}
+
+/// 10 ms of interleaved stereo at 44.1 kHz.
+const BLOCK_SAMPLES: u32 = 882;
+/// A block peaking above this (−3 dBFS) counts as loud.
+const LOUD_PEAK: f32 = 0.708;
 
 /// How faithful a capture is to what Spotify decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +61,10 @@ pub enum Fidelity {
     /// as Spotify's own 24-bit path does (see `docs/PLAN.md`, point 3 bis).
     /// Rounding to 24 bits restores the source except on exact half steps.
     NearTransparent,
+    /// Samples changed only around the loudest peaks (within 3 dB of full
+    /// scale), the rest exact: Spotify limits some tracks (measured on a
+    /// 16-bit track, `docs/PLAN.md`). Kept at 24 bits.
+    PeakLimited,
     /// Gain, resampling or effects changed the signal.
     Processed,
     /// Digital silence: nothing to judge.
@@ -43,7 +77,7 @@ impl Fidelity {
         match self {
             Self::BitPerfect { depth } => depth,
             Self::Silent => 16,
-            Self::NearTransparent | Self::Processed => 24,
+            Self::NearTransparent | Self::PeakLimited | Self::Processed => 24,
         }
     }
 }
@@ -59,6 +93,11 @@ impl BitAnalysis {
             self.samples += 1;
             let magnitude = sample.abs();
             self.peak = self.peak.max(magnitude);
+            if self.block.samples == BLOCK_SAMPLES {
+                self.close_block();
+            }
+            self.block.samples += 1;
+            self.block.peak = self.block.peak.max(magnitude);
             if magnitude > 1.0 {
                 self.clipped += 1;
             }
@@ -68,6 +107,7 @@ impl BitAnalysis {
             if scaled_24 != scaled_24.round() {
                 let exact = f64::from(sample) * f64::from(SCALE_24);
                 self.residual_24 += (exact - exact.round()).abs();
+                self.block.off += 1;
                 self.not_24_bit += 1;
                 self.not_16_bit += 1;
                 continue;
@@ -76,6 +116,15 @@ impl BitAnalysis {
             if scaled_16 != scaled_16.round() {
                 self.not_16_bit += 1;
             }
+        }
+    }
+
+    fn close_block(&mut self) {
+        let block = std::mem::take(&mut self.block);
+        if block.peak >= LOUD_PEAK {
+            self.loud.add(block);
+        } else {
+            self.quiet.add(block);
         }
     }
 
@@ -121,6 +170,19 @@ impl BitAnalysis {
         }
         if let Some(depth) = self.effective_depth() {
             return Fidelity::BitPerfect { depth };
+        }
+        let (mut loud, mut quiet) = (self.loud, self.quiet);
+        if self.block.peak >= LOUD_PEAK {
+            loud.add(self.block);
+        } else {
+            quiet.add(self.block);
+        }
+        let quiet_off = quiet.off as f64 / quiet.samples.max(1) as f64;
+        // Without enough quiet audio there is no evidence the processing
+        // stops below the peaks.
+        let quiet_enough = quiet.samples >= u64::from(BLOCK_SAMPLES) * 100;
+        if loud.off > 0 && quiet_enough && quiet_off < 0.001 {
+            return Fidelity::PeakLimited;
         }
         let mean_residual = self.residual_24 / self.samples as f64;
         if self.clipped == 0 && mean_residual < NEAR_TRANSPARENT_RESIDUAL {
@@ -396,16 +458,29 @@ mod tests {
             Fidelity::BitPerfect { depth: 16 }
         );
 
-        // Spotify's 24-bit path: one sample in ten nudged by a quarter step.
+        // Spotify's 24-bit path: one sample in ten nudged by a quarter step,
+        // at every level (quiet passages included, unlike a limiter). The
+        // signal is taken 12 dB down, exactly, so the nudge is representable.
         let nudged: Vec<f32> = clean
             .iter()
             .enumerate()
-            .map(|(i, &s)| if i % 10 == 0 { s + 0.25 / SCALE_24 } else { s })
+            .map(|(i, &s)| {
+                let s = s * 0.25;
+                if i % 10 == 0 { s + 0.25 / SCALE_24 } else { s }
+            })
             .collect();
         assert_eq!(analyse(&nudged).fidelity(), Fidelity::NearTransparent);
 
         let processed: Vec<f32> = clean.iter().map(|s| s * 0.9).collect();
         assert_eq!(analyse(&processed).fidelity(), Fidelity::Processed);
+
+        // A limiter: exact quiet passage, only the loud stretch touched
+        // (Modern Dinosaur, measured 2026-10-01).
+        let mut limited: Vec<f32> = (0..88_200)
+            .map(|i| ((i % 200) as f32 - 100.0) / SCALE_16)
+            .collect();
+        limited.extend((0..8_820).map(|i| if i % 2 == 0 { 0.95 } else { -0.9 } * 0.999_9));
+        assert_eq!(analyse(&limited).fidelity(), Fidelity::PeakLimited);
         assert_eq!(analyse(&[0.0; 64]).fidelity(), Fidelity::Silent);
     }
 
