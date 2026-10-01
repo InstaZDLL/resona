@@ -67,6 +67,7 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
     let quality = |fidelity: Fidelity| match fidelity {
         Fidelity::BitPerfect { depth } => format!("bit-perfect {depth}-bit"),
         Fidelity::NearTransparent => "near-transparent 24-bit".into(),
+        Fidelity::PeakLimited => "peaks limited by Spotify, 24-bit".into(),
         Fidelity::Processed => "PROCESSED (check audio settings)".into(),
         Fidelity::Silent => "silent".into(),
     };
