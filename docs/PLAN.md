@@ -84,7 +84,29 @@ Comportement initial à porter depuis `Spotify/SpotifyProcess.cs`, `SpotifyStatu
 - Reprendre les cas de `EspionSpotify.Tests/SpotifyStatusTests.cs` et `SpotifyProcessTests.cs`.
 - `EspionSpotify.FakeSpotify` produit un faux `Spotify.exe`. Il est reconnu par `find_root_pid` et reste utile pour tester sans le vrai client.
 
-### Phase 2 — Moteur d'enregistrement
+### Phase 2 — Moteur d'enregistrement (en cours)
+
+Fait, dans `recorder/` :
+
+- `splitter` (pur, testé) : l'audio est retenu 3 s avant d'être écrit, et chaque changement est placé à l'échantillon où il a eu lieu, dans le passé. La coupure est recalée sur le silence le plus proche (±300 ms d'après le titre, ±100 ms quand SMTC a daté le début). Pause : le silence numérique est ignoré et le fichier continue. Pubs et inactivité ne sont pas écrites. Silence coupé aux deux extrémités, gardé à l'intérieur. Détails SMTC reçus moins de 1,5 s avant une coupure ignorés.
+- `clock` : correspondance instant ↔ échantillon, sans extrapoler à travers une pause sans paquets.
+- `naming` : `Artiste - Titre.flac`, caractères interdits remplacés, noms réservés évités, doublons numérotés.
+- `engine` (Windows) : capture + moniteur + découpeur, un WAV temporaire par morceau dans `.spytify-tmp`, encodage FLAC sur un thread à part, profondeur choisie par `analysis::Fidelity`. Reprise automatique de la capture si Spotify redémarre. Morceaux partiels (rejoints en cours, sautés) et trop courts écartés par défaut.
+- `monitor` envoie des événements horodatés, plus `TrackStart` : le début du morceau daté par la position SMTC et l'heure de sa mise à jour.
+- Exemple `record` : `cargo run -p spytify-core --example record -- <dossier> [minutes] [--keep-partial]`.
+
+Premier essai réel (1er octobre 2026) :
+
+- Enchaînements et morceaux partiels corrects (rejoint en cours, interrompu à l'arrêt).
+- **Pause prise pour une pub** : le fondu de sortie de Spotify s'entend encore au poll suivant. Corrigé dans `state::classify` : titre de veille + SMTC en pause sur le même morceau = pause, même avec du son.
+- **Tout enregistré « PROCESSED »**, sur toute la durée (99,4 % hors grille 16 bits d'après `analyze_flac`) : les **améliorations audio étaient réactivées** (*Device Default Effects*, effet « Logitech HX2E Surround Sound Effect »), probablement par G HUB, alors qu'une capture précédente les montrait sur Off. **Détection fiable**, vérifiée dans les deux sens le 1er octobre 2026 : lire `MMDevicesAudioRender{id}xproperties` dans le registre. un effet est installé (`{d04e05a6…},1/2/5/6/7`) et `disable_sysfx` (`{1da5d803…},5`) ≠ 1 ; windows **supprime** cette valeur quand on choisit *device default effects*. l'api `immdevice::openpropertystore` ne voit pas ces valeurs (toujours vt_empty). `recorderevent::capturestarted` porte le périphérique et ses `lossless_issues()`.
+- Deuxième essai, effets désactivés : **pause correcte** (un seul fichier) et durées justes à 1 s près (silence retiré aux extrémités). Slow et Heaven (24 bits) : quasi transparents. PLAIINS (16 bits) : bit-perfect. Tell Me I'm Wrong (16 bits) : propre sauf le fondu de la pause (0:21-0:22) et trois rafales de ~200 échantillons. **Modern Dinosaur (16 bits) : limiteur** : 35,5 % d'échantillons modifiés là où le niveau local est à moins de 3 dB du maximum, aucun en dessous (`analyze_flac`). Tell Me, aussi fort, n'est pas touché. À trancher : effet du morceau précédent (Slow, 24 bits, enchaîné) ou propre au morceau.
+- À faire : revérifier ce réglage pendant une session (g hub peut le réactiver en cours de route), et vérifier si le changer s'applique au flux déjà ouvert par spotify ou s'il faut le redémarrer.
+- À traiter : un fondu de pause ou de reprise modifie quelques centaines d'échantillons. Un morceau 16 bits mis en pause ne sera plus « bit-perfect » et sera écrit en 24 bits. Piste : tolérer une infime part d'échantillons hors grille pour le choix de la profondeur.
+
+À vérifier avec le vrai client : la précision des coupures (début et fin de chaque fichier), pause/reprise, saut de morceau, fermeture de Spotify pendant l'enregistrement, changement de périphérique de sortie en cours de session (la disposition des canaux est lue au démarrage de la capture).
+
+Plan initial :
 
 Porter `Watcher.cs`, `Recorder.cs` et `AudioSessions/AudioThrottler.cs` :
 

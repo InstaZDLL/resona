@@ -4,13 +4,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use crossbeam_channel::{Receiver, Sender};
 
 use super::process::SpotifyProcesses;
 use super::smtc::{Smtc, SmtcSnapshot};
 use super::state::{self, Content, Event, SmtcView, Status};
+use super::title::TrackTitle;
 use super::window;
 
 /// Same period as the C# watcher.
@@ -97,6 +98,21 @@ pub fn status_of(observation: &Observation, audio_active: bool, previous: &Conte
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant, reason = "a few events per second at most")]
+pub enum MonitorEvent {
+    /// A status change, observed at `at`. The change itself happened
+    /// earlier: up to one poll, plus Spotify's own delay in updating.
+    Status { at: Instant, event: Event },
+    /// SMTC dated the start of the current track: `started_at` is when its
+    /// first sample played, to within a few milliseconds. Sent once per
+    /// track, a poll or so after its [`Event::ContentChanged`].
+    TrackStart {
+        title: TrackTitle,
+        started_at: Instant,
+    },
+}
+
 pub struct Monitor {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -108,7 +124,7 @@ impl Monitor {
     /// recorder answers it from the capture stream.
     pub fn spawn(
         audio_active: impl Fn() -> bool + Send + 'static,
-    ) -> std::io::Result<(Self, Receiver<Event>)> {
+    ) -> std::io::Result<(Self, Receiver<MonitorEvent>)> {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
@@ -138,18 +154,49 @@ impl Drop for Monitor {
     }
 }
 
-fn run(events: &Sender<Event>, stop: &AtomicBool, audio_active: &dyn Fn() -> bool) {
+fn run(events: &Sender<MonitorEvent>, stop: &AtomicBool, audio_active: &dyn Fn() -> bool) {
     let _ = wasapi::initialize_mta();
     let mut poller = Poller::new();
     let mut previous = Status::NOT_RUNNING;
+    let mut dated: Option<TrackTitle> = None;
     while !stop.load(Ordering::Relaxed) {
-        let current = status_of(&poller.observe(), audio_active(), &previous.content);
+        let observation = poller.observe();
+        let at = Instant::now();
+        let current = status_of(&observation, audio_active(), &previous.content);
         for event in state::diff(&previous, &current) {
-            if events.send(event).is_err() {
+            if events.send(MonitorEvent::Status { at, event }).is_err() {
+                return;
+            }
+        }
+        if let Content::Track(track) = &current.content
+            && dated.as_ref() != Some(&track.title)
+            && let Some(started_at) = observation
+                .smtc
+                .as_ref()
+                .and_then(|s| track_start(s, &track.title))
+        {
+            dated = Some(track.title.clone());
+            let start = MonitorEvent::TrackStart {
+                title: track.title.clone(),
+                started_at,
+            };
+            if events.send(start).is_err() {
                 return;
             }
         }
         previous = current;
         thread::sleep(POLL_INTERVAL);
     }
+}
+
+/// When `title` started playing, from SMTC's position and the time it was
+/// published. Only while playing: a paused timeline dates nothing.
+fn track_start(smtc: &SmtcSnapshot, title: &TrackTitle) -> Option<Instant> {
+    if !smtc.playing || !state::smtc_title_matches(&smtc.title, title) {
+        return None;
+    }
+    let since_update = SystemTime::now()
+        .duration_since(smtc.timeline_updated?)
+        .unwrap_or_default();
+    Instant::now().checked_sub(since_update + smtc.position.unwrap_or_default())
 }

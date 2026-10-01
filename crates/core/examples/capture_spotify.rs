@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
     let device = audio_setup::default_output_device()?;
     println!(
-        "output device: {} — {} Hz, {} bits, {} channels (mask {:#x}){}, volume {:.0} % ({:.1} dB){}{}",
+        "output device: {} — {} Hz, {} bits, {} channels (mask {:#x}){}, volume {:.0} % ({:.1} dB){}{}{}",
         device.name,
         device.sample_rate,
         device.bits_per_sample,
@@ -47,6 +47,11 @@ fn main() -> anyhow::Result<()> {
         device.volume_scalar * 100.0,
         device.volume_db,
         if device.muted { ", MUTED" } else { "" },
+        if device.enhancements == Some(true) {
+            "  ⚠ audio enhancements ON"
+        } else {
+            ""
+        },
         if device.resamples() {
             "  ⚠ not 44100 Hz"
         } else {

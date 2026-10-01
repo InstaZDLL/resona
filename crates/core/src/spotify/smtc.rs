@@ -2,7 +2,7 @@
 //! its media overlay. Gives album, album artist, track number and duration,
 //! which the window title does not.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
@@ -22,8 +22,11 @@ pub struct SmtcSnapshot {
     pub album_artist: String,
     pub track_number: Option<u32>,
     pub playing: bool,
-    /// As of the session's last timeline update, not "now".
+    /// As of [`Self::timeline_updated`], not "now".
     pub position: Option<Duration>,
+    /// When Spotify last published `position`. With it, `position` dates
+    /// the start of the track to within a few milliseconds.
+    pub timeline_updated: Option<SystemTime>,
     pub duration: Option<Duration>,
 }
 
@@ -61,10 +64,18 @@ impl Smtc {
                 playing,
                 position: from_timespan(timeline.Position()?.Duration),
                 duration: from_timespan(timeline.EndTime()?.Duration),
+                timeline_updated: from_datetime(timeline.LastUpdatedTime()?.UniversalTime),
             }));
         }
         Ok(None)
     }
+}
+
+/// `DateTime` counts 100 ns ticks since 1601-01-01 UTC; zero means unset.
+fn from_datetime(ticks: i64) -> Option<SystemTime> {
+    const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+    let since_unix = u64::try_from(ticks.checked_sub(UNIX_EPOCH_TICKS)?).ok()?;
+    (ticks > 0).then(|| UNIX_EPOCH + Duration::from_nanos(since_unix * 100))
 }
 
 /// `TimeSpan` counts 100 ns ticks; zero means "not provided".
