@@ -1,0 +1,31 @@
+[package]
+name = "spytify-core"
+description = "Spotify detection, per-process capture, encoding and tagging for Spytify. No UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crossbeam-channel = "0.5.17"
+flacenc = "0.5.1"
+hound = "3.5.1"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+sysinfo = "0.39.6"
+wasapi = "0.24"
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media_Control",
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+anyhow = "1.0.104"
+tracing-subscriber = "0.3.23"

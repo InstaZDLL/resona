@@ -1,0 +1,23 @@
+import { Button, VerticalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    in property <string> spotify-status;
+    callback refresh();
+
+    title: "Spytify";
+    min-width: 420px;
+    min-height: 200px;
+
+    VerticalBox {
+        alignment: center;
+        Text {
+            text: root.spotify-status;
+            horizontal-alignment: center;
+            font-size: 15px;
+        }
+        Button {
+            text: "Actualiser";
+            clicked => { root.refresh(); }
+        }
+    }
+}

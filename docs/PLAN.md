@@ -1,0 +1,184 @@
+# Plan de réécriture de Spytify en Rust
+
+Spytify enregistre ce que joue le client Spotify pour Windows, découpe le flux en morceaux, ignore les pubs et écrit les tags. La version d'origine est en C# / WinForms (`E:\Workspace\spy-spotify`). Cette réécriture garde le principe (on enregistre la sortie, on ne télécharge rien) et ajoute le **Lossless de Spotify** (FLAC jusqu'à 24 bits / 44,1 kHz).
+
+## Décisions prises
+
+| Sujet | Choix | Raison |
+| --- | --- | --- |
+| Interface | **Slint 1.18**, rendu logiciel, style Fluent | Mesuré dans `WaveFlow/prototypes/rust_slint_mini` : 10,5 Mo privés contre 78 Mo pour egui. L'appli tourne en fond toute la nuit. Widgets de formulaire prêts, i18n intégrée (`@tr`). |
+| Capture | **WASAPI process loopback** sur l'arbre `Spotify.exe` | Seul le son de Spotify est capturé. Plus besoin du pilote VB-Cable ni de la redirection par les interfaces COM non documentées (`Router/AudioRouter.cs`). |
+| Encodage | Capture dans un WAV float 32 bits temporaire, encodage à la fin du morceau | Le chemin de capture reste simple ; l'encodeur connaît l'analyse complète du morceau (profondeur FLAC). C'est aussi ce que fait la version C#. |
+| Plateforme | Windows uniquement | Spotify desktop + WASAPI. Le code Windows est derrière `#[cfg(windows)]`. |
+
+## Décisions ouvertes
+
+- **Version minimale de Windows.** Le process loopback est documenté à partir de Windows 10 build 20348. À vérifier en pratique sur Windows 10 22H2 (build 19045).
+- **API Spotify Web.** Voir [ci-dessous](#api-spotify-web). Proposition : Deezer + Last.fm par défaut, API Spotify en option plus tard.
+
+Réglé : le code repris de WaveFlow peut être republié ici sous MIT. Les fichiers concernés (`metadata/deezer.rs`, `lastfm.rs`, `name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs`) n'ont qu'un seul auteur, le propriétaire des deux dépôts. Revérifier avec `git log --format='%an' -- <fichier>` avant de copier un autre fichier.
+
+## Phases
+
+### Phase 0 — Valider la capture (validée le 1er octobre 2026)
+
+Fait : `spytify-core::capture` (process loopback), `spotify::find_root_pid`, `analysis::BitAnalysis`, `encode::flac`, et l'exemple :
+
+```powershell
+cargo run -p spytify-core --example capture_spotify -- 30 test.flac
+```
+
+Questions à trancher avec le vrai client :
+
+1. La capture fonctionne avec `include_tree` sur le processus racine (l'audio est rendu par un processus enfant).
+2. **Volume** : le process loopback capture-t-il avant ou après le volume de session Windows et le volume de Spotify ? Tester 100 % puis 80 %, et regarder `bit-transparent`.
+3. **Fréquence du périphérique** : périphérique par défaut en 48 kHz puis en 44,1 kHz. Spotify ou Windows rééchantillonne-t-il avant nous ?
+4. **Coupure du son pour les pubs** : si on coupe la session audio de Spotify (comme `MainAudioSession` en C#), la capture reçoit-elle encore le son ? Cela décide comment ignorer les pubs.
+5. Pause : que reçoit la capture ?
+
+Mesures du 1er octobre 2026 (Spotify Microsoft Store, casque Logitech PRO X) :
+
+| Point | Résultat |
+| --- | --- |
+| 1. Capture de l'arbre de processus | ✅ 30,0 s capturées, aucune perte (`discontinuities 0`) |
+| 2. Volume | Le volume du périphérique (12 %, −30,7 dB) **n'est pas** dans la capture : on peut écouter à n'importe quel volume. Curseur Spotify au maximum. |
+| 2 bis. Canaux | ✅ Le casque (G HUB, surround virtuel) est un périphérique **7.1**. En stéréo, Windows remixait les 8 canaux : −13 dB et signal recalculé. Corrigé dans le code : capture dans la disposition du périphérique, paire avant gardée (`format::front_stereo`). Les 6 autres canaux sont vides. `SPYTIFY_FORCE_STEREO=1` refait l'ancienne capture. |
+| 2 ter. Effets | ✅ **Cause du traitement restant : « Améliorations audio » de Windows** (*Device Default Effects*) sur le casque. Désactivées : `bit-transparent: yes, source is 16-bit` sur un morceau Lossless 16 bits. Désactiver seulement l'égaliseur G HUB ne suffisait pas : G HUB passe probablement par ces effets. Égaliseur et normalisation de Spotify étaient déjà désactivés (non testés séparément). |
+| 3. Fréquence du périphérique | ✅ **Le périphérique doit être en 44,1 kHz.** En 48 kHz, le flux est rééchantillonné avant la capture (81 % hors grille, écart moyen 0,25 pas). Spotify Lossless ne dépasse jamais 44,1 kHz, donc rien n'est perdu à l'imposer. |
+| 3 bis. Source 24 bits | ⚠ « Heaven » (swim school, Lossless 24 bits) à 44,1 kHz : **presque transparent**. 13,6 % des échantillons sont hors grille 24 bits, avec un écart moyen de 0,02 à 0,09 pas, et la première seconde est parfaite. Analyse (`analyze_wav`) : décalages à **tous les niveaux** (pas un limiteur), **gauche et droite aux mêmes trames** (103 003 contre ~13 600 au hasard), en rafales d'environ 5 trames, d'au plus un demi-pas 24 bits (≈ −144 dBFS). Signature d'un signal quasi nul ajouté à la musique, ou d'un décodage en float. Ce n'est pas un processus enfant à lui seul : exclure chacun ne change rien. Automix désactivé : inchangé. Pas un décodage milieu/côté (21 % seulement de décalages identiques à gauche et à droite, corrélation +0,27). **Conclusion : le traitement 24 bits interne de Spotify.** Le morceau 16 bits était à 0,00 % avec les mêmes réglages et la même chaîne, donc ni Windows ni un flux parasite ne sont en cause. Conséquence : l'export FLAC 24 bits arrondit à l'entier le plus proche, ce qui retrouve exactement la source tant que l'écart reste sous ½ pas. Seuls les écarts d'exactement ½ pas (≈ 4 % des échantillons, passages forts) sont ambigus à 1 pas près. **Statut : 24 bits « quasi transparent ».** Phase 3 : faire distinguer à `BitAnalysis` ce cas (écart max ≤ ½ pas 24 bits) d'un vrai traitement.  À noter : `include_tree: false` de wasapi capture tout **sauf** l'arbre ; Windows n'a pas de mode « ce processus seul ». Un casque limité à 16 bits en sortie n'empêche pas la capture 24 bits. |
+| 4. Coupure du son pour les pubs | À tester (`session_volumes` lit l'état, il faut encore pouvoir couper) |
+| 5. Pause | ⚠ Spotify Store **continue d'envoyer des paquets silencieux** en pause. Le silence n'est plus compté comme « transparent ». |
+
+Diagnostics ajoutés : `audio_setup::default_output_device` (format du périphérique) et `audio_setup::session_volumes` (volume et coupure des sessions Spotify), affichés par `capture_spotify`.
+
+Critère de sortie, **atteint** : un morceau affiché « Lossless 16-bit » par Spotify est capturé bit-transparent et détecté en 16 bits. Restent à éclaircir sans bloquer la suite : le léger écart des sources 24 bits (point 3 bis) et la coupure du son pour les pubs.
+
+### Phase 1 — Détection de Spotify (en cours)
+
+Fait :
+
+- `spotify::process` : processus racine et liste des PID.
+- `spotify::window` : titre de la fenêtre Chromium, même si elle est masquée dans la zone de notification.
+- `spotify::smtc` : session SMTC.
+- `spotify::title` : analyse du titre, avec les cas des tests C#.
+- `spotify::state` : combine titre, SMTC et activité audio, puis calcule les événements.
+- `spotify::monitor` : thread qui interroge toutes les 500 ms.
+- Exemple `spotify_probe` pour observer Spotify en direct.
+
+Constaté le 1er octobre 2026 avec la version Microsoft Store de Spotify :
+
+- Le processus s'appelle bien `Spotify.exe`. L'identifiant SMTC est `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify` (`Spotify.exe` attendu pour l'installateur classique, non vérifié).
+- En pause, le titre de fenêtre repasse à `Spotify Premium`, mais **SMTC garde le morceau** (titre, artiste, album, n° de piste, durée, position) avec `playing: false`. `state::classify` s'en sert : une pause n'émet que `PlayStateChanged`, plus de faux changement de morceau.
+- Au changement de morceau, le titre de fenêtre change en premier ; SMTC suit au poll suivant, et **pas d'un bloc** : la durée du morceau suivant a été vue à côté du titre précédent.
+
+Reste à faire :
+
+- Observer avec `spotify_probe` : une pub (compte Free), un podcast, l'installateur classique (non Store).
+- Brancher `audio_active` sur la capture (phase 2).
+
+Comportement initial à porter depuis `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs` et `SpotifyHandler.cs` :
+
+- Titre de la fenêtre principale de l'arbre Spotify (`EnumWindows` + PID) ; `Spotify`, `Spotify Free` ou `Spotify Premium` = en veille ou en pub, sinon `Artiste - Titre`.
+- Événements : changement de morceau, lecture/pause, position.
+- Étudier SMTC (`GlobalSystemMediaTransportControlsSessionManager`) : artiste, titre, album et durée sans analyser le titre. Garder le titre de fenêtre en secours, en particulier pour reconnaître les pubs.
+- Reprendre les cas de `EspionSpotify.Tests/SpotifyStatusTests.cs` et `SpotifyProcessTests.cs`.
+- `EspionSpotify.FakeSpotify` produit un faux `Spotify.exe`. Il est reconnu par `find_root_pid` et reste utile pour tester sans le vrai client.
+
+### Phase 2 — Moteur d'enregistrement
+
+Porter `Watcher.cs`, `Recorder.cs` et `AudioSessions/AudioThrottler.cs` :
+
+- Machine à états : morceau courant, changement → finaliser le morceau précédent et démarrer le suivant.
+- **Pause / reprise** : le moniteur n'émet que `PlayStateChanged` (le contenu reste le même morceau). Le recorder continue le même fichier. Une pause suivie d'un saut de morceau donne bien un changement.
+- **Métadonnées SMTC** : garder les `DetailsUpdated` restés stables (au moins deux polls), pas les derniers reçus juste avant le changement de morceau, qui peuvent mélanger deux morceaux.
+- `audio_active` du moniteur : vrai quand la capture reçoit des paquets **non silencieux** (Spotify Store envoie du silence en pause). C'est ce qui révèle une pub derrière un titre « Spotify Free ».
+- Tampon de pré-écoute (`AudioCircularBuffer`) pour ne pas perdre le début d'un morceau détecté en retard. Le titre change environ 500 ms après le son. Ring buffer `rtrb`, comme le moteur audio de WaveFlow.
+- Suppression du silence au début et à la fin (`SilenceAnalyzer`), durée minimale, morceaux déjà enregistrés ignorés, numéros d'ordre, nommage et dossiers (`Native/FileManager.cs`, tests `FileManagerTests.cs`).
+- Pubs : selon le point 4 de la phase 0.
+
+### Phase 3 — Formats de sortie
+
+- WAV : `hound`.
+- MP3 CBR 128 à 320 kbps : `mp3lame-encoder` (LAME, comme la version C#).
+- FLAC : fait. Ajouter un dither TPDF quand l'utilisateur force 16 bits sur une source 24 bits.
+
+### Phase 4 — Tags et métadonnées
+
+- `lofty` : ID3v2 pour le MP3, commentaires Vorbis et image pour le FLAC. Écrire via le tag concret, comme la règle de WaveFlow (`edit::patch_file`), sinon des champs non standards disparaissent.
+- Reprendre de `WaveFlow/src-tauri/crates/core` : `metadata/deezer.rs`, `metadata/lastfm.rs`, `metadata/name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs` (écriture fiable sous Windows : nouvelles tentatives si un antivirus verrouille le fichier). Copier les modules plutôt que dépendre de `waveflow-core`, qui embarque sqlx, symphonia, libopus et wasmtime.
+- Reprendre les cas de `MapperID3Tests.cs`, `LastFMAPITests.cs`.
+
+### Phase 5 — Interface Slint
+
+Porter `frmEspionSpotify` : bouton d'enregistrement, console de logs, réglages (dossier, format, débit, qualité Spotify, profondeur FLAC, durée minimale, options sur les pubs, langue), réduction dans la zone de notification.
+
+- i18n : `@tr()` + gettext, `fr` et `en`. Remplace les `.resx`, `TranslationKeys` et `I18NKeys`.
+- Réglages : un fichier TOML dans `%APPDATA%\Spytify`.
+
+### Phase 6 — Distribution
+
+- CI GitHub Actions sur `windows-latest` : `cargo fmt --check`, `clippy -D warnings`, `cargo test`.
+- Installateur (MSI ou `cargo-packager`) et mise à jour via les releases GitHub (remplace `EspionSpotify.Updater`).
+
+## Lossless (nouvelle fonctionnalité)
+
+Spotify Lossless : Premium, réglage *Qualité audio → Lossless* dans le client, FLAC jusqu'à 24 bits / 44,1 kHz. Certains morceaux sont des masters 16 bits.
+
+Ce que fait Spytify :
+
+1. Il capture à 44,1 kHz en float 32 bits (`format::CAPTURE_SAMPLE_RATE`), sans rééchantillonnage de notre côté.
+2. `analysis::BitAnalysis` vérifie chaque échantillon : si le signal n'a pas été modifié, chaque valeur float est exactement un entier 16 ou 24 bits. Un seul étage de gain ou de rééchantillonnage fait sortir la quasi-totalité des échantillons de cette grille. Une capture non transparente est donc détectée sur un morceau entier.
+3. Il écrit en FLAC avec `BitDepth::Auto` : 16 bits si la source l'est, 24 bits sinon.
+4. Il indique dans la console, morceau par morceau, si la capture était bit-transparente. Sinon, il donne les réglages à vérifier.
+
+Réglages demandés à l'utilisateur, d'après la phase 0 :
+
+- Spotify : qualité **Lossless**, curseur de volume au maximum, *Normaliser le volume* et **égaliseur** désactivés, **crossfade et Automix désactivés** (sinon les fins de morceaux se mélangent, quel que soit le format).
+- Windows : **« Améliorations audio » sur Off** pour le périphérique de sortie (cause vérifiée), **format du périphérique en 44,1 kHz** (vérifié : 48 kHz rééchantillonne), son spatial désactivé, session Spotify à 100 % dans le mélangeur.
+- Pas besoin de toucher au volume Windows ni de repasser un casque 7.1 en stéréo : la capture n'en dépend pas.
+
+À vérifier par l'appli elle-même (phase 5) :
+
+- `BitAnalysis` sur chaque morceau, avec le diagnostic de `capture_spotify` (`estimate_gain` pour un volume, `grid_residual` pour un effet) traduit en conseil.
+- Lire l'état des améliorations audio avant d'enregistrer (propriété `PKEY_AudioEndpoint_Disable_SysFx` du périphérique) et prévenir l'utilisateur.
+- Piste à étudier : si seul un gain constant gêne (curseur Spotify pas au maximum), diviser par le pas estimé redonne les entiers d'origine exactement. À vérifier bloc par bloc, car le gain peut changer en cours de morceau.
+
+Choix d'interface : la qualité Spotify (`format::SpotifyQuality`) est un réglage. *Lossless* propose FLAC Auto par défaut, *Premium* MP3 320, *Free* MP3 160. Les pubs n'existent qu'en Free : la logique pubs ne s'applique pas aux deux autres.
+
+## API Spotify Web
+
+La version C# (`API/SpotifyAPI.cs`) s'en sert pour deux choses :
+
+- **Lecture en cours** (`GET /me/player`) : morceau exact (ID), position, et `currently_playing_type = "ad"` pour reconnaître les pubs.
+- **Tags** : titre, artistes, numéro de piste et de disque, album, artistes de l'album, date de sortie, pochette 640 px. Les genres d'album sont presque toujours vides.
+
+Depuis les changements de février 2026, pour les applis en mode développement :
+
+- le propriétaire de l'appli doit avoir **Premium**, sinon l'appli cesse de fonctionner. Chaque utilisateur crée sa propre appli : les utilisateurs Free, ceux qui ont des pubs, ne peuvent plus du tout s'en servir ;
+- `external_ids` (l'**ISRC**) a été retiré des pistes et des albums, tout comme `label` et `popularity` ;
+- la récupération groupée (`GET /tracks`, `GET /albums`) a été supprimée.
+
+Ce qui reste utile par rapport aux autres sources :
+
+| Besoin | Sans API Spotify |
+| --- | --- |
+| Artiste, titre, album, position | SMTC (phase 1) |
+| N° de piste et de disque, date, pochette HD, genres, label, ISRC | Deezer, recherche artiste + titre + album (`album_match.rs`) |
+| Reconnaître les pubs | Titre de fenêtre / SMTC (Free uniquement) |
+| Bonne version du morceau (remaster, live, édition) | L'ID Spotify est sans ambiguïté ; Deezer peut se tromper de version. C'est le seul vrai apport. |
+
+Décision proposée : ne pas la porter dans la première version. Si des erreurs de version apparaissent en pratique, l'ajouter en option pour les Premium (OAuth PKCE en local, sans secret client).
+
+## Correspondance C# → Rust
+
+| C# (`spy-spotify`) | Rust (`spytify`) |
+| --- | --- |
+| `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs`, `SpotifyHandler.cs` | `core::spotify` (phase 1) |
+| `AudioSessions/*`, `Router/*`, `Drivers/*` | `core::capture` (process loopback, sans pilote) |
+| `Watcher.cs`, `Recorder.cs` | `core::recorder` (phase 2) |
+| `Native/FileManager.cs` | `core::files` (phase 2) |
+| `Recorder.GetMediaFileWriter` (NAudio.Lame) | `core::encode` |
+| `API/*`, `MapperID3.cs` | `core::metadata`, `core::tags` (phase 4) |
+| `frmEspionSpotify.cs`, `Translations/*` | `app` + `ui/*.slint` (phase 5) |
+| `Settings.settings`, `Models/UserSettings.cs` | `core::settings` (TOML) |
+| `EspionSpotify.Updater` | phase 6 |
