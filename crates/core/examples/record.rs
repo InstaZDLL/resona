@@ -61,6 +61,7 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
 
     use spytify_core::analysis::Fidelity;
     use spytify_core::audio_setup::SetupIssue;
+    use spytify_core::metadata::TagsOutcome;
     use spytify_core::recorder::engine::RecorderEvent;
     use spytify_core::spotify::state::Event;
 
@@ -98,10 +99,16 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
             path,
             fidelity,
             duration,
+            tags,
         } => println!(
-            "✔ saved      {title}  [{}, {}]  → {}",
+            "✔ saved      {title}  [{}, {}, tags: {}]  → {}",
             length(duration),
             quality(fidelity),
+            match tags {
+                TagsOutcome::Deezer => "Deezer".to_string(),
+                TagsOutcome::NoMatch => "Spotify only (no Deezer match)".to_string(),
+                TagsOutcome::Unavailable(why) => format!("Spotify only ({why})"),
+            },
             path.display()
         ),
         RecorderEvent::Discarded {

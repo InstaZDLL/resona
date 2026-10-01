@@ -14,6 +14,9 @@ pub enum Error {
     #[error("FLAC encoder error: {0}")]
     Flac(String),
 
+    #[error("tag writing failed: {0}")]
+    Tags(String),
+
     #[error("unsupported intermediate WAV: {0}")]
     UnsupportedWav(&'static str),
 

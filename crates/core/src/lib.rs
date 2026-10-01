@@ -7,6 +7,7 @@ pub mod analysis;
 pub mod encode;
 pub mod error;
 pub mod format;
+pub mod metadata;
 pub mod recorder;
 pub mod spotify;
 

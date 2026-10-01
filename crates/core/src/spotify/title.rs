@@ -28,14 +28,23 @@ pub struct TrackTitle {
     pub separator: TitleSeparator,
 }
 
+impl TrackTitle {
+    /// The title as Spotify displays it, extension included
+    /// (`Song - Live`, `Song (Remastered 2011)`), without the artist.
+    pub fn full_title(&self) -> String {
+        match (&self.title_extended, self.separator) {
+            (Some(extended), TitleSeparator::Dash) => format!("{} - {extended}", self.title),
+            (Some(extended), TitleSeparator::Parenthesis) => {
+                format!("{} ({extended})", self.title)
+            }
+            _ => self.title.clone(),
+        }
+    }
+}
+
 impl std::fmt::Display for TrackTitle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} - {}", self.artist, self.title)?;
-        match (&self.title_extended, self.separator) {
-            (Some(extended), TitleSeparator::Dash) => write!(f, " - {extended}"),
-            (Some(extended), TitleSeparator::Parenthesis) => write!(f, " ({extended})"),
-            _ => Ok(()),
-        }
+        write!(f, "{} - {}", self.artist, self.full_title())
     }
 }
 
