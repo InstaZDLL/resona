@@ -36,9 +36,12 @@ pub struct OutputDevice {
     /// Same, as the 0.0 to 1.0 slider position.
     pub volume_scalar: f32,
     pub muted: bool,
-    /// Windows "Audio enhancements" are on and an effect is installed: it
-    /// processes the stream before our capture, so nothing captured is
-    /// lossless. `None` if the device's effect settings could not be read.
+    /// An effect is installed and not disabled in the registry, so Windows
+    /// "Audio enhancements" *may* process the stream before our capture.
+    /// A hint, not a verdict: the registry and the Settings switch have
+    /// been seen to disagree (a headset utility rewriting the effect
+    /// properties), and an installed effect may be inactive. The per-track
+    /// [`crate::analysis::Fidelity`] is what tells. `None` if unreadable.
     pub enhancements: Option<bool>,
 }
 

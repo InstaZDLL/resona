@@ -66,7 +66,10 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
     use spytify_core::spotify::state::Event;
 
     let quality = |fidelity: Fidelity| match fidelity {
-        Fidelity::BitPerfect { depth } => format!("bit-perfect {depth}-bit"),
+        Fidelity::BitPerfect { depth, touched: 0 } => format!("bit-perfect {depth}-bit"),
+        Fidelity::BitPerfect { depth, touched } => {
+            format!("bit-perfect {depth}-bit, {touched} samples touched by Spotify")
+        }
         Fidelity::NearTransparent => "near-transparent 24-bit".into(),
         Fidelity::PeakLimited => "peaks limited by Spotify, 24-bit".into(),
         Fidelity::Processed => "PROCESSED (check audio settings)".into(),
@@ -83,8 +86,9 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
             for issue in device.lossless_issues() {
                 match issue {
                     SetupIssue::Enhancements => println!(
-                        "  ⚠ Windows audio enhancements are on: recordings will not be lossless \
-                         (Settings → Sound → device → Audio enhancements → Off)"
+                        "  ⚠ Windows audio enhancements may be on (an effect is installed and not \
+                         disabled in the registry). Check Settings → Sound → device → Audio \
+                         enhancements → Off; each saved track says whether it was altered."
                     ),
                     SetupIssue::SampleRate(rate) => println!(
                         "  ⚠ the device runs at {rate} Hz: set it to 44100 Hz for lossless recordings"
