@@ -1,8 +1,8 @@
-//! Phase 2 harness: a real recording session. Play music in Spotify and
-//! watch tracks being saved as FLAC.
+//! A real recording session from the command line, with the app's saved
+//! settings (`%APPDATA%\Spytify\settings.toml`), overridden by the flags.
 //!
 //! ```text
-//! cargo run -p spytify-core --example record -- <output dir> [minutes] [--keep-partial]
+//! cargo run -p spytify-core --example record -- [output dir] [minutes] [--keep-partial]
 //!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
@@ -11,38 +11,39 @@ fn main() -> anyhow::Result<()> {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use spytify_core::format::OutputFormat;
-    use spytify_core::recorder::engine::{Recorder, RecorderConfig};
+    use spytify_core::recorder::engine::Recorder;
+    use spytify_core::settings::Settings;
 
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::WARN)
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let keep_partial = args.iter().any(|a| a == "--keep-partial");
-    let format: OutputFormat = args
-        .iter()
-        .find_map(|a| a.strip_prefix("--format="))
-        .unwrap_or("flac")
-        .parse()
-        .map_err(anyhow::Error::msg)?;
+    let mut settings = Settings::load();
+    settings.min_duration_secs = 10;
+    if args.iter().any(|a| a == "--keep-partial") {
+        settings.keep_partial = true;
+    }
+    if let Some(format) = args.iter().find_map(|a| a.strip_prefix("--format=")) {
+        settings.format = format.parse().map_err(anyhow::Error::msg)?;
+    }
     let mut positional = args.iter().filter(|a| !a.starts_with("--"));
-    let output_dir = PathBuf::from(positional.next().map_or("recordings", String::as_str));
+    if let Some(dir) = positional.next() {
+        settings.output_dir = PathBuf::from(dir);
+    }
     let minutes: u64 = positional
         .next()
         .map(|m| m.parse())
         .transpose()?
         .unwrap_or(10);
 
-    let (recorder, events) = Recorder::start(RecorderConfig {
-        output_dir: output_dir.clone(),
-        keep_partial,
-        min_duration: Duration::from_secs(10),
-        format,
-    })?;
+    let (recorder, events) = Recorder::start(settings.recorder_config())?;
     println!(
-        "recording into {} as {format:?} for {minutes} min{}",
-        output_dir.display(),
-        if keep_partial {
+        "recording into {} as {} for {minutes} min — {:?}, existing tracks: {:?}{}",
+        settings.output_dir.display(),
+        settings.format,
+        settings.layout,
+        settings.existing,
+        if settings.keep_partial {
             " (keeping partial tracks)"
         } else {
             ""
@@ -107,6 +108,27 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
         }
         RecorderEvent::CaptureLost => println!("capture lost, retrying…"),
         RecorderEvent::Recording(title) => println!("● recording  {title}"),
+        RecorderEvent::AlreadyRecorded {
+            title,
+            existing,
+            skipped_in_spotify,
+        } => println!(
+            "↷ already    {title} ({}){}",
+            existing.display(),
+            if skipped_in_spotify {
+                ", skipped in Spotify"
+            } else {
+                ""
+            }
+        ),
+        RecorderEvent::AdMuted(muted) => println!(
+            "  {}",
+            if muted {
+                "ad: Spotify muted"
+            } else {
+                "Spotify unmuted"
+            }
+        ),
         RecorderEvent::Saved {
             title,
             path,

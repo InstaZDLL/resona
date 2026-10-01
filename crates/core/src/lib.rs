@@ -9,6 +9,7 @@ pub mod error;
 pub mod format;
 pub mod metadata;
 pub mod recorder;
+pub mod settings;
 pub mod spotify;
 
 #[cfg(windows)]

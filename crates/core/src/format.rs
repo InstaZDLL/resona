@@ -73,6 +73,22 @@ impl OutputFormat {
     }
 }
 
+/// The form [`OutputFormat::from_str`](std::str::FromStr) reads back.
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let depth = |depth: BitDepth| match depth {
+            BitDepth::Auto => "",
+            BitDepth::Bits16 => "16",
+            BitDepth::Bits24 => "24",
+        };
+        match *self {
+            Self::Flac { depth: d } => write!(f, "flac{}", depth(d)),
+            Self::Wav { depth: d } => write!(f, "wav{}", depth(d)),
+            Self::Mp3 { kbps } => write!(f, "mp3:{kbps}"),
+        }
+    }
+}
+
 impl std::str::FromStr for OutputFormat {
     type Err = String;
 
@@ -173,6 +189,9 @@ mod tests {
         assert_eq!(parse("mp3:160"), Ok(OutputFormat::Mp3 { kbps: 160 }));
         assert!(parse("mp3:300").is_err());
         assert!(parse("ogg").is_err());
+        for text in ["flac", "flac16", "wav24", "mp3:192"] {
+            assert_eq!(parse(text).unwrap().to_string(), text);
+        }
         assert_eq!(BitDepth::Auto.resolve(24), 24);
         assert_eq!(BitDepth::Bits16.resolve(24), 16);
     }

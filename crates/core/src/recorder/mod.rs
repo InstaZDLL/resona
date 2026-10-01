@@ -3,6 +3,7 @@
 
 pub mod boundary;
 pub mod clock;
+pub mod library;
 pub mod naming;
 pub mod splitter;
 

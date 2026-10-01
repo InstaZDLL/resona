@@ -42,6 +42,18 @@ impl Smtc {
         })
     }
 
+    /// Asks Spotify to go to the next track, as its "next" button does.
+    /// Returns whether Spotify accepted.
+    pub fn skip_spotify(&self) -> Result<bool> {
+        for session in self.manager.GetSessions()? {
+            let app_id = session.SourceAppUserModelId()?.to_string();
+            if app_id.to_ascii_lowercase().contains("spotify") {
+                return Ok(session.TrySkipNextAsync()?.join()?);
+            }
+        }
+        Ok(false)
+    }
+
     /// Spotify's session, if Spotify registered one.
     pub fn spotify(&self) -> Result<Option<SmtcSnapshot>> {
         for session in self.manager.GetSessions()? {
