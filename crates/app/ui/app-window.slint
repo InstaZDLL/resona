@@ -1,23 +1,499 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox } from "std-widgets.slint";
+
+export enum SpotifyState { not-running, idle, playing, paused, ad }
+export enum TrackState { recording, saved, discarded, already-recorded, failed }
+/// Quality of a saved or discarded track, from the fidelity analysis.
+export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
+export enum Reason { none, partial, too-short, already-recorded }
+export enum Warning { enhancements, sample-rate, processed, error }
+
+export struct TrackRow {
+    title: string,
+    length: string,
+    state: TrackState,
+    quality: Quality,
+    depth: int,
+    touched: int,
+    reason: Reason,
+    tagged: bool,
+    format: string,
+}
+
+export struct Notice {
+    kind: Warning,
+    detail: string,
+}
+
+component Card inherits Rectangle {
+    background: #ffffff;
+    border-radius: 10px;
+    drop-shadow-blur: 6px;
+    drop-shadow-color: #00000014;
+}
+
+component QualityBadge inherits Rectangle {
+    in property <TrackRow> track;
+    property <string> label: root.track.state == TrackState.recording ? @tr("recording…")
+        : root.track.state == TrackState.already-recorded ? @tr("already recorded")
+        : root.track.state == TrackState.failed ? @tr("error")
+        : root.track.state == TrackState.discarded ? (
+            root.track.reason == Reason.partial ? @tr("partial")
+            : root.track.reason == Reason.too-short ? @tr("too short")
+            : @tr("already recorded"))
+        : root.track.quality == Quality.bit-perfect ? @tr("bit-perfect {}-bit", root.track.depth)
+        : root.track.quality == Quality.near-transparent ? @tr("near-lossless 24-bit")
+        : root.track.quality == Quality.peak-limited ? @tr("peaks limited by Spotify")
+        : root.track.quality == Quality.processed ? @tr("altered")
+        : root.track.format;
+    property <color> tint: root.track.state == TrackState.recording ? #e5484d
+        : root.track.state != TrackState.saved ? #8e8e93
+        : root.track.quality == Quality.bit-perfect ? #1db954
+        : root.track.quality == Quality.processed ? #d97706
+        : #0a84ff;
+    border-radius: 4px;
+    background: tint.with-alpha(0.12);
+    height: 20px;
+    width: badge-text.preferred-width + 12px;
+    badge-text := Text {
+        text: root.label;
+        color: root.tint.darker(0.2);
+        font-size: 11px;
+        font-weight: 600;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+component TrackLine inherits Rectangle {
+    in property <TrackRow> track;
+    height: 40px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Text {
+            width: 16px;
+            vertical-alignment: center;
+            text: root.track.state == TrackState.recording ? "●"
+                : root.track.state == TrackState.saved ? "✔"
+                : root.track.state == TrackState.already-recorded ? "↷"
+                : "✘";
+            color: root.track.state == TrackState.recording ? #e5484d
+                : root.track.state == TrackState.saved ? #1db954
+                : #8e8e93;
+        }
+        Text {
+            text: root.track.title;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            color: root.track.state == TrackState.saved || root.track.state == TrackState.recording ? #1d1d1f : #6e6e73;
+        }
+        Text {
+            text: root.track.length;
+            vertical-alignment: center;
+            color: #6e6e73;
+            font-size: 12px;
+        }
+        VerticalLayout {
+            alignment: center;
+            QualityBadge { track: root.track; }
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #0000000d;
+    }
+}
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 8px;
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        width: 130px;
+        wrap: word-wrap;
+        color: #1d1d1f;
+    }
+    @children
+}
+
+component Section inherits VerticalLayout {
+    in property <string> title;
+    spacing: 8px;
+    Text {
+        text: root.title;
+        font-weight: 700;
+        font-size: 13px;
+        color: #6e6e73;
+    }
+    @children
+}
 
 export component AppWindow inherits Window {
-    in property <string> spotify-status;
-    callback refresh();
+    // Spotify
+    in property <SpotifyState> spotify-state: SpotifyState.not-running;
+    in property <string> now-title;
+    in property <string> now-artist;
+    in property <string> now-album;
+
+    // Session
+    in property <bool> recording;
+    in property <bool> finishing;
+    in property <string> elapsed: "00:00:00";
+    in property <[TrackRow]> tracks;
+    in property <[Notice]> notices;
+    in property <int> saved-count;
+
+    // Settings, written back by the panel
+    in-out property <string> output-dir;
+    in-out property <int> quality-index: 2;
+    in-out property <int> format-index;
+    in-out property <int> min-duration: 30;
+    in-out property <bool> keep-partial;
+    in-out property <int> folders-index;
+    in-out property <int> prefix-index;
+    in-out property <int> existing-index;
+    in-out property <bool> skip-in-spotify;
+    in-out property <bool> mute-ads: true;
+    in-out property <int> language-index;
+
+    callback toggle-recording();
+    callback browse-output();
+    callback open-output();
+    callback quality-changed(int);
+    callback settings-changed();
+    callback language-changed(int);
+
+    property <bool> settings-open;
 
     title: "Spytify";
-    min-width: 420px;
-    min-height: 200px;
+    min-width: 460px;
+    min-height: 620px;
+    preferred-width: 480px;
+    preferred-height: 700px;
+    background: #f5f5f7;
+    default-font-size: 13px;
 
-    VerticalBox {
-        alignment: center;
-        Text {
-            text: root.spotify-status;
-            horizontal-alignment: center;
-            font-size: 15px;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // Header
+        HorizontalLayout {
+            Text {
+                text: "Spytify";
+                font-size: 20px;
+                font-weight: 800;
+                color: #1d1d1f;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: @tr("⚙ Settings");
+                clicked => { root.settings-open = true; }
+            }
         }
-        Button {
-            text: "Actualiser";
-            clicked => { root.refresh(); }
+
+        // Now playing
+        Card {
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 14px;
+                Rectangle {
+                    width: 64px;
+                    height: 64px;
+                    border-radius: 6px;
+                    background: root.spotify-state == SpotifyState.playing ? #1db95426 : #0000000d;
+                    Text {
+                        text: root.spotify-state == SpotifyState.ad ? "AD" : "♪";
+                        font-size: 26px;
+                        color: #6e6e73;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 3px;
+                    Text {
+                        text: root.spotify-state == SpotifyState.not-running ? @tr("Spotify is not running")
+                            : root.spotify-state == SpotifyState.ad ? @tr("Advertisement")
+                            : root.now-title == "" ? @tr("Nothing playing")
+                            : root.now-title;
+                        font-size: 16px;
+                        font-weight: 700;
+                        overflow: elide;
+                        color: #1d1d1f;
+                    }
+                    Text {
+                        text: root.now-album == "" ? root.now-artist : root.now-artist + " · " + root.now-album;
+                        visible: root.now-title != "" && root.spotify-state != SpotifyState.ad;
+                        overflow: elide;
+                        color: #6e6e73;
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: root.spotify-state == SpotifyState.playing ? @tr("▶ Playing")
+                                : root.spotify-state == SpotifyState.paused ? @tr("⏸ Paused")
+                                : root.spotify-state == SpotifyState.ad ? @tr("Ad, not recorded")
+                                : root.spotify-state == SpotifyState.idle ? @tr("Spotify is open")
+                                : @tr("Start Spotify to record");
+                            color: #6e6e73;
+                            font-size: 12px;
+                        }
+                        Text {
+                            visible: root.recording;
+                            text: "● REC " + root.elapsed;
+                            color: #e5484d;
+                            font-size: 12px;
+                            font-weight: 700;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Notices
+        for notice in root.notices: Rectangle {
+            background: notice.kind == Warning.error ? #ffe5e5 : #fff4e5;
+            border-radius: 8px;
+            height: notice-text.preferred-height + 16px;
+            notice-text := Text {
+                x: 12px;
+                width: parent.width - 24px;
+                wrap: word-wrap;
+                color: notice.kind == Warning.error ? #a40000 : #8a4b00;
+                text: notice.kind == Warning.enhancements ? @tr("⚠ Windows audio enhancements may be on: recordings would not be lossless. Settings → Sound → your device → Audio enhancements → Off.")
+                    : notice.kind == Warning.sample-rate ? @tr("⚠ Your output device runs at {} Hz. Set it to 44100 Hz (Settings → Sound → your device → Format) for lossless recordings.", notice.detail)
+                    : notice.kind == Warning.processed ? @tr("⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings.", notice.detail)
+                    : notice.detail;
+            }
+        }
+
+        // Record button
+        Rectangle {
+            height: 48px;
+            border-radius: 24px;
+            background: root.finishing ? #c7c7cc
+                : root.recording ? (touch.has-hover ? #d13438 : #e5484d)
+                : (touch.has-hover ? #17a34a : #1db954);
+            Text {
+                text: root.finishing ? @tr("Finishing the last track…")
+                    : root.recording ? @tr("■  Stop recording")
+                    : @tr("●  Start recording");
+                color: white;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            touch := TouchArea {
+                enabled: !root.finishing;
+                mouse-cursor: pointer;
+                clicked => { root.toggle-recording(); }
+            }
+        }
+
+        // Session
+        Card {
+            vertical-stretch: 1;
+            VerticalLayout {
+                HorizontalLayout {
+                    padding: 12px;
+                    Text {
+                        text: @tr("This session · {} saved", root.saved-count);
+                        font-weight: 700;
+                        color: #1d1d1f;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: @tr("Open folder");
+                        color: #0a84ff;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-output(); }
+                        }
+                    }
+                }
+                if root.tracks.length == 0: Text {
+                    text: root.recording ? @tr("Waiting for the next track…") : @tr("Recorded tracks will appear here.");
+                    color: #8e8e93;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    vertical-stretch: 1;
+                }
+                if root.tracks.length > 0: ListView {
+                    vertical-stretch: 1;
+                    for row in root.tracks: TrackLine { track: row; }
+                }
+            }
+        }
+
+        Text {
+            text: root.output-dir;
+            color: #8e8e93;
+            font-size: 11px;
+            overflow: elide;
+        }
+    }
+
+    // Settings panel, sliding over from the right
+    if root.settings-open: Rectangle {
+        background: #00000033;
+        TouchArea {
+            clicked => { root.settings-open = false; }
+        }
+    }
+    Rectangle {
+        x: root.settings-open ? root.width - self.width : root.width;
+        width: min(380px, root.width);
+        height: root.height;
+        background: #ffffff;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000030;
+        animate x { duration: 180ms; easing: ease-out; }
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+            HorizontalLayout {
+                Text {
+                    text: @tr("Settings");
+                    font-size: 18px;
+                    font-weight: 800;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Button {
+                    text: "✕";
+                    clicked => { root.settings-open = false; }
+                }
+            }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 18px;
+                    padding-right: 8px;
+
+                    Section {
+                        title: @tr("Recording");
+                        SettingRow {
+                            label: @tr("Folder");
+                            LineEdit {
+                                text: root.output-dir;
+                                read-only: true;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: "…";
+                                clicked => { root.browse-output(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Spotify quality");
+                            ComboBox {
+                                model: [@tr("Free (160 kbps)"), @tr("Premium (320 kbps)"), @tr("Lossless (FLAC)")];
+                                current-index <=> root.quality-index;
+                                horizontal-stretch: 1;
+                                selected => { root.quality-changed(self.current-index); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Format");
+                            ComboBox {
+                                model: [
+                                    @tr("FLAC, depth of the source"), "FLAC 16-bit", "FLAC 24-bit",
+                                    @tr("WAV, depth of the source"), "WAV 16-bit", "WAV 24-bit",
+                                    "MP3 320 kbps", "MP3 256 kbps", "MP3 192 kbps", "MP3 160 kbps", "MP3 128 kbps",
+                                ];
+                                current-index <=> root.format-index;
+                                horizontal-stretch: 1;
+                                selected => { root.settings-changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Shortest track kept (s)");
+                            SpinBox {
+                                minimum: 0;
+                                maximum: 600;
+                                value <=> root.min-duration;
+                                horizontal-stretch: 1;
+                                edited => { root.settings-changed(); }
+                            }
+                        }
+                        CheckBox {
+                            text: @tr("Keep tracks recorded only in part (joined late, skipped)");
+                            checked <=> root.keep-partial;
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+
+                    Section {
+                        title: @tr("Files");
+                        SettingRow {
+                            label: @tr("Sub-folders");
+                            ComboBox {
+                                model: [@tr("None"), @tr("Artist"), @tr("Artist / Album")];
+                                current-index <=> root.folders-index;
+                                horizontal-stretch: 1;
+                                selected => { root.settings-changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Before the name");
+                            ComboBox {
+                                model: [@tr("Nothing"), @tr("Track number (04)"), @tr("Recording order (001)")];
+                                current-index <=> root.prefix-index;
+                                horizontal-stretch: 1;
+                                selected => { root.settings-changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Already recorded");
+                            ComboBox {
+                                model: [@tr("Skip it"), @tr("Replace it"), @tr("Keep both")];
+                                current-index <=> root.existing-index;
+                                horizontal-stretch: 1;
+                                selected => { root.settings-changed(); }
+                            }
+                        }
+                        CheckBox {
+                            text: @tr("Make Spotify skip tracks already recorded");
+                            enabled: root.existing-index == 0;
+                            checked <=> root.skip-in-spotify;
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+
+                    Section {
+                        title: @tr("Ads (Spotify Free)");
+                        CheckBox {
+                            text: @tr("Mute Spotify during ads");
+                            checked <=> root.mute-ads;
+                            toggled => { root.settings-changed(); }
+                        }
+                    }
+
+                    Section {
+                        title: @tr("Interface");
+                        SettingRow {
+                            label: @tr("Language");
+                            ComboBox {
+                                model: ["Français", "English"];
+                                current-index <=> root.language-index;
+                                horizontal-stretch: 1;
+                                selected => { root.language-changed(self.current-index); }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: @tr("For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect.");
+                        wrap: word-wrap;
+                        color: #6e6e73;
+                        font-size: 12px;
+                    }
+                }
+            }
         }
     }
 }

@@ -1,0 +1,187 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+# Track badges
+msgid "recording…"
+msgstr "en cours…"
+
+msgid "already recorded"
+msgstr "déjà enregistré"
+
+msgid "error"
+msgstr "erreur"
+
+msgid "partial"
+msgstr "incomplet"
+
+msgid "too short"
+msgstr "trop court"
+
+msgid "bit-perfect {}-bit"
+msgstr "bit-perfect {} bits"
+
+msgid "near-lossless 24-bit"
+msgstr "quasi sans perte, 24 bits"
+
+msgid "peaks limited by Spotify"
+msgstr "crêtes limitées par Spotify"
+
+msgid "altered"
+msgstr "modifié"
+
+# Header and now playing
+msgid "⚙ Settings"
+msgstr "⚙ Réglages"
+
+msgid "Spotify is not running"
+msgstr "Spotify n'est pas lancé"
+
+msgid "Advertisement"
+msgstr "Publicité"
+
+msgid "Nothing playing"
+msgstr "Aucune lecture"
+
+msgid "▶ Playing"
+msgstr "▶ Lecture"
+
+msgid "⏸ Paused"
+msgstr "⏸ En pause"
+
+msgid "Ad, not recorded"
+msgstr "Pub, non enregistrée"
+
+msgid "Spotify is open"
+msgstr "Spotify est ouvert"
+
+msgid "Start Spotify to record"
+msgstr "Lancez Spotify pour enregistrer"
+
+# Notices
+msgid "⚠ Windows audio enhancements may be on: recordings would not be lossless. Settings → Sound → your device → Audio enhancements → Off."
+msgstr "⚠ Les améliorations audio de Windows sont peut-être actives : les enregistrements ne seraient pas sans perte. Paramètres → Son → votre périphérique → Améliorations audio → Désactivé."
+
+msgid "⚠ Your output device runs at {} Hz. Set it to 44100 Hz (Settings → Sound → your device → Format) for lossless recordings."
+msgstr "⚠ Votre périphérique de sortie fonctionne à {} Hz. Réglez-le sur 44100 Hz (Paramètres → Son → votre périphérique → Format) pour enregistrer sans perte."
+
+msgid "⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings."
+msgstr "⚠ « {} » a été modifié entre Spotify et l'enregistrement (effet, rééchantillonnage ou volume). Vérifiez les réglages audio."
+
+# Recording
+msgid "Finishing the last track…"
+msgstr "Finalisation du dernier morceau…"
+
+msgid "■  Stop recording"
+msgstr "■  Arrêter l'enregistrement"
+
+msgid "●  Start recording"
+msgstr "●  Démarrer l'enregistrement"
+
+msgid "This session · {} saved"
+msgstr "Cette session · {} enregistrés"
+
+msgid "Open folder"
+msgstr "Ouvrir le dossier"
+
+msgid "Waiting for the next track…"
+msgstr "En attente du prochain morceau…"
+
+msgid "Recorded tracks will appear here."
+msgstr "Les morceaux enregistrés apparaîtront ici."
+
+# Settings panel
+msgid "Settings"
+msgstr "Réglages"
+
+msgid "Recording"
+msgstr "Enregistrement"
+
+msgid "Folder"
+msgstr "Dossier"
+
+msgid "Spotify quality"
+msgstr "Qualité Spotify"
+
+msgid "Free (160 kbps)"
+msgstr "Gratuit (160 kbps)"
+
+msgid "Premium (320 kbps)"
+msgstr "Premium (320 kbps)"
+
+msgid "Lossless (FLAC)"
+msgstr "Lossless (FLAC)"
+
+msgid "Format"
+msgstr "Format"
+
+msgid "FLAC, depth of the source"
+msgstr "FLAC, profondeur de la source"
+
+msgid "WAV, depth of the source"
+msgstr "WAV, profondeur de la source"
+
+msgid "Shortest track kept (s)"
+msgstr "Durée minimale gardée (s)"
+
+msgid "Keep tracks recorded only in part (joined late, skipped)"
+msgstr "Garder les morceaux incomplets (pris en cours, passés)"
+
+msgid "Files"
+msgstr "Fichiers"
+
+msgid "Sub-folders"
+msgstr "Sous-dossiers"
+
+msgid "None"
+msgstr "Aucun"
+
+msgid "Artist"
+msgstr "Artiste"
+
+msgid "Artist / Album"
+msgstr "Artiste / Album"
+
+msgid "Before the name"
+msgstr "Devant le nom"
+
+msgid "Nothing"
+msgstr "Rien"
+
+msgid "Track number (04)"
+msgstr "Numéro de piste (04)"
+
+msgid "Recording order (001)"
+msgstr "Ordre d'enregistrement (001)"
+
+msgid "Already recorded"
+msgstr "Déjà enregistré"
+
+msgid "Skip it"
+msgstr "Le passer"
+
+msgid "Replace it"
+msgstr "Le remplacer"
+
+msgid "Keep both"
+msgstr "Garder les deux"
+
+msgid "Make Spotify skip tracks already recorded"
+msgstr "Faire passer à Spotify les morceaux déjà enregistrés"
+
+msgid "Ads (Spotify Free)"
+msgstr "Publicités (Spotify Gratuit)"
+
+msgid "Mute Spotify during ads"
+msgstr "Couper le son de Spotify pendant les pubs"
+
+msgid "Interface"
+msgstr "Interface"
+
+msgid "Language"
+msgstr "Langue"
+
+msgid "For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect."
+msgstr "Pour enregistrer sans perte : Spotify en qualité Lossless, volume au maximum, normalisation, égaliseur, fondu enchaîné et Automix désactivés ; améliorations audio de Windows désactivées et périphérique de sortie à 44100 Hz. Chaque morceau enregistré indique s'il est sorti bit-perfect."

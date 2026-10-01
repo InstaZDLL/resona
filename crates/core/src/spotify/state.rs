@@ -149,10 +149,20 @@ pub enum Event {
     },
     /// Same track, SMTC details arrived or changed.
     DetailsUpdated(Track),
+    /// Spotify was started or closed. Sent first, before the content
+    /// change it brings.
+    RunningChanged {
+        running: bool,
+    },
 }
 
 pub fn diff(previous: &Status, current: &Status) -> Vec<Event> {
     let mut events = Vec::new();
+    if previous.running != current.running {
+        events.push(Event::RunningChanged {
+            running: current.running,
+        });
+    }
     if previous.playing != current.playing {
         events.push(Event::PlayStateChanged {
             playing: current.playing,
@@ -325,6 +335,7 @@ mod tests {
         assert!(matches!(
             events[..],
             [
+                Event::RunningChanged { running: true },
                 Event::PlayStateChanged { playing: true },
                 Event::ContentChanged { .. }
             ]

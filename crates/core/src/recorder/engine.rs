@@ -312,6 +312,7 @@ impl Session {
                     Event::ContentChanged { current, .. } => Some(Change::Content(current.clone())),
                     Event::PlayStateChanged { playing } => Some(Change::Playing(*playing)),
                     Event::DetailsUpdated(track) => Some(Change::Details(track.clone())),
+                    Event::RunningChanged { .. } => None,
                 };
                 let _ = self.events.send(RecorderEvent::Spotify(event));
                 if let Some(change) = change {

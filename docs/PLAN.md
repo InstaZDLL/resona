@@ -159,6 +159,16 @@ Plan initial :
 
 Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours, bouton, liste des morceaux de la session avec leur qualité) et **panneau latéral de réglages**. Options reprises de la version C# : organisation des fichiers, morceaux déjà enregistrés, pubs. Abandonnées : périphérique audio et câble virtuel (capture par processus), identifiants API Spotify (Deezer), minuterie.
 
+Fait côté interface (`crates/app`) :
+
+- `ui/app-window.slint` : en-tête, carte « en cours » (état de Spotify, titre, artiste, album, minuteur REC), avertissements, bouton Démarrer/Arrêter, liste de la session avec un badge de qualité par morceau, panneau de réglages qui glisse depuis la droite.
+- Textes en anglais dans `@tr()`, traduits par `translations/fr/LC_MESSAGES/spytify.po`, intégré au binaire ; la langue change à chaud.
+- `app.rs` : un moniteur dédié à l'affichage (l'état de Spotify est visible même sans enregistrer), les événements du moteur transmis à la boucle Slint, l'arrêt (qui attend l'encodage du dernier morceau) hors du thread de l'interface, réglages enregistrés à chaque modification, choix du dossier avec `rfd`.
+- `mapping.rs` (pur, testé) : listes de l'interface ↔ réglages.
+- Vérifié le 1er octobre 2026 : fenêtre en français, morceau en cours et changements suivis.
+
+Reste : pochette du morceau en cours (vignette SMTC), icône dans la zone de notification, test complet du panneau de réglages.
+
 Fait côté moteur :
 
 - `settings` : `Settings` en TOML dans `%APPDATA%\Spytify\settings.toml` (écriture atomique, fichier abîmé mis de côté, champs manquants par défaut), `recorder_config()`.
