@@ -56,7 +56,10 @@ const LOUD_PEAK: f32 = 0.708;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fidelity {
     /// Every sample is the source's integer value: a real lossless rip.
-    BitPerfect { depth: u8 },
+    /// `touched` counts the few samples Spotify altered anyway (short fades
+    /// at a pause or a buffer hiccup, a few hundred per track at most):
+    /// they are rounded to `depth` rather than making the whole track 24-bit.
+    BitPerfect { depth: u8, touched: u64 },
     /// Off the 24-bit grid by a small fraction of a step on some samples,
     /// as Spotify's own 24-bit path does (see `docs/PLAN.md`, point 3 bis).
     /// Rounding to 24 bits restores the source except on exact half steps.
@@ -75,12 +78,16 @@ impl Fidelity {
     /// FLAC bits per sample that keep everything the capture holds.
     pub fn flac_depth(self) -> u8 {
         match self {
-            Self::BitPerfect { depth } => depth,
+            Self::BitPerfect { depth, .. } => depth,
             Self::Silent => 16,
             Self::NearTransparent | Self::PeakLimited | Self::Processed => 24,
         }
     }
 }
+
+/// At most one sample in this many off the 24-bit grid still counts as
+/// bit-perfect (610 in 17.8 million, measured on a 16-bit track).
+const TOUCHED_RATIO: u64 = 10_000;
 
 /// Mean distance to the 24-bit grid separating the two non-perfect cases:
 /// measured around 0.02 to 0.09 step for Spotify's 24-bit path, 0.25 (a
@@ -168,8 +175,19 @@ impl BitAnalysis {
         if self.is_silent() {
             return Fidelity::Silent;
         }
-        if let Some(depth) = self.effective_depth() {
-            return Fidelity::BitPerfect { depth };
+        // A handful of altered samples does not make a processed track.
+        if self.clipped == 0 && self.not_24_bit * TOUCHED_RATIO <= self.samples {
+            // Off-grid samples count as "not 16-bit" too: the depth comes
+            // from the others.
+            let depth = if self.not_16_bit == self.not_24_bit {
+                16
+            } else {
+                24
+            };
+            return Fidelity::BitPerfect {
+                depth,
+                touched: self.not_24_bit,
+            };
         }
         let (mut loud, mut quiet) = (self.loud, self.quiet);
         if self.block.peak >= LOUD_PEAK {
@@ -181,7 +199,8 @@ impl BitAnalysis {
         // Without enough quiet audio there is no evidence the processing
         // stops below the peaks.
         let quiet_enough = quiet.samples >= u64::from(BLOCK_SAMPLES) * 100;
-        if loud.off > 0 && quiet_enough && quiet_off < 0.001 {
+        let loud_off = loud.off as f64 / loud.samples.max(1) as f64;
+        if loud_off >= 0.001 && quiet_enough && quiet_off < 0.001 {
             return Fidelity::PeakLimited;
         }
         let mean_residual = self.residual_24 / self.samples as f64;
@@ -455,8 +474,27 @@ mod tests {
             .collect();
         assert_eq!(
             analyse(&clean).fidelity(),
-            Fidelity::BitPerfect { depth: 16 }
+            Fidelity::BitPerfect {
+                depth: 16,
+                touched: 0
+            }
         );
+
+        // A few samples faded by Spotify (Tell Me I'm Wrong: 610 in 17.8 M)
+        // keep a 16-bit track bit-perfect and 16-bit.
+        let mut touched = clean.clone();
+        for s in touched.iter_mut().step_by(25_000) {
+            *s *= 0.9;
+        }
+        let analysis = analyse(&touched);
+        assert!(matches!(
+            analysis.fidelity(),
+            Fidelity::BitPerfect {
+                depth: 16,
+                touched: 1..=4
+            }
+        ));
+        assert_eq!(analysis.fidelity().flac_depth(), 16);
 
         // Spotify's 24-bit path: one sample in ten nudged by a quarter step,
         // at every level (quiet passages included, unlike a limiter). The
