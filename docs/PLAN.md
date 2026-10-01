@@ -125,7 +125,22 @@ Porter `Watcher.cs`, `Recorder.cs` et `AudioSessions/AudioThrottler.cs` :
 - MP3 CBR 128 à 320 kbps : `mp3lame-encoder` (LAME, comme la version C#).
 - FLAC : fait. Ajouter un dither TPDF quand l'utilisateur force 16 bits sur une source 24 bits.
 
-### Phase 4 — Tags et métadonnées
+### Phase 4 — Tags et métadonnées (en cours)
+
+Fait, dans `metadata/` :
+
+- `deezer` : client bloquant repris de WaveFlow (gestion des refus dans le corps de la réponse, limite de débit), avec morceau, album et pochette. **La recherche avancée `artist:"…" track:"…"` ne renvoie plus rien** (vérifié le 1er octobre 2026) : recherche en texte libre, puis sélection stricte.
+- `lookup` (pur, testé) : un résultat n'est retenu que si le titre (≥ 0,85, featuring ignoré), l'artiste (un de ceux listés par Spotify) et la durée (±3 s) concordent ; l'album départage. Un remix ou un live est rejeté. Mieux vaut des tags incomplets que faux.
+- `name_match` : repris de WaveFlow, avec `title_similarity`.
+- `tags` : `TrackTags` construit depuis Spotify et SMTC, complété par Deezer (album, artiste de l'album, piste/total, disque, date, genres, ISRC, label, pochette XL). Écrit via le tag concret `VorbisComments` de lofty.
+- Moteur : FLAC encodé et tagué dans `.spytify-tmp`, puis déplacé dans le dossier final. `RecorderEvent::Saved` indique l'origine des tags (`TagsOutcome`).
+- Exemple `tag_lookup "Artiste" "Titre" ["Album"] [secondes]`.
+
+Vérifié en réel : Tell Me I'm Wrong, Modern Dinosaur, Heaven et Waterfalls (feat.) trouvés, avec ISRC, label, genres et pochette.
+
+Reste : Last.fm en secours (clé API), MP3 (ID3v2) avec la phase 3, réglage pour désactiver la recherche en ligne.
+
+Plan initial :
 
 - `lofty` : ID3v2 pour le MP3, commentaires Vorbis et image pour le FLAC. Écrire via le tag concret, comme la règle de WaveFlow (`edit::patch_file`), sinon des champs non standards disparaissent.
 - Reprendre de `WaveFlow/src-tauri/crates/core` : `metadata/deezer.rs`, `metadata/lastfm.rs`, `metadata/name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs` (écriture fiable sous Windows : nouvelles tentatives si un antivirus verrouille le fichier). Copier les modules plutôt que dépendre de `waveflow-core`, qui embarque sqlx, symphonia, libopus et wasmtime.

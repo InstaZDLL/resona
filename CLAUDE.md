@@ -28,6 +28,7 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 
 - `crates/core` (`spytify-core`) — engine, no UI: `spotify` (process, window title, SMTC → `state::Status` → `monitor` events), `capture` (WASAPI process loopback thread), `analysis` (bit-transparency), `encode` (intermediate WAV + FLAC), `format`. Windows-only modules are behind `#[cfg(windows)]` so the crate still builds and tests elsewhere.
 - Decision logic is kept pure and unit-tested (`spotify::title`, `spotify::state`, `analysis`); Windows modules only gather inputs. Keep new logic on the pure side.
+- `metadata/` — `deezer` (blocking client, no key), `lookup` (pure: a Deezer hit is used only if title, artist and duration all agree), `tags` (`TrackTags`, written through lofty's concrete `VorbisComments`). Tags are best-effort: a failed lookup keeps Spotify's own details, never fails a recording.
 - `recorder/` — `splitter` (pure: holds audio back 3 s and places each change at the frame it happened), `clock`, `naming`, `engine` (Windows: capture + monitor + splitter + FLAC encoder thread).
 - `examples/` are the manual test harnesses against the real client: `capture_spotify`, `analyze_wav`, `spotify_probe`, `record`.
 - `crates/app` (`spytify`) — Slint UI. `ui/*.slint` compiled by `build.rs` with the `fluent` style. Slint is built with `renderer-software` + `backend-winit` on purpose (low memory, measured in WaveFlow); don't switch renderers without measuring.

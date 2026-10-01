@@ -21,6 +21,9 @@ use crate::audio_setup::{self, OutputDevice};
 use crate::capture::{CaptureConfig, Packet, ProcessCapture};
 use crate::encode::{flac, wav::CaptureWav};
 use crate::format::CAPTURE_SAMPLE_RATE;
+use crate::metadata::deezer::DeezerClient;
+use crate::metadata::tags::TrackTags;
+use crate::metadata::{self, TagsOutcome};
 use crate::spotify::monitor::{Monitor, MonitorEvent};
 use crate::spotify::process::SpotifyProcesses;
 use crate::spotify::state::Event;
@@ -61,6 +64,8 @@ pub enum RecorderEvent {
         path: PathBuf,
         fidelity: Fidelity,
         duration: Duration,
+        /// Where the tags beyond Spotify's own came from, or why not.
+        tags: TagsOutcome,
     },
     Discarded {
         title: TrackTitle,
@@ -321,8 +326,11 @@ fn unique_stamp() -> String {
 }
 
 fn encode_jobs(config: &RecorderConfig, jobs: &Receiver<Job>, events: &Sender<RecorderEvent>) {
+    let deezer = DeezerClient::new()
+        .inspect_err(|e| tracing::warn!("no Deezer client, Spotify tags only: {e}"))
+        .ok();
     for job in jobs {
-        let event = match encode(config, &job) {
+        let event = match encode(config, deezer.as_ref(), &job) {
             Ok(event) => event,
             Err(e) => RecorderEvent::Error(format!("{}: {e}", job.ended.track.title)),
         };
@@ -331,7 +339,11 @@ fn encode_jobs(config: &RecorderConfig, jobs: &Receiver<Job>, events: &Sender<Re
     }
 }
 
-fn encode(config: &RecorderConfig, job: &Job) -> Result<RecorderEvent> {
+fn encode(
+    config: &RecorderConfig,
+    deezer: Option<&DeezerClient>,
+    job: &Job,
+) -> Result<RecorderEvent> {
     let title = job.ended.track.title.clone();
     let duration = job.ended.duration(CAPTURE_SAMPLE_RATE);
     let fidelity = job.analysis.fidelity();
@@ -350,12 +362,26 @@ fn encode(config: &RecorderConfig, job: &Job) -> Result<RecorderEvent> {
             duration,
         });
     }
+    // Encoded and tagged next to the WAV, then moved into place: the
+    // output folder never shows a half-written file.
+    let staged = job.wav.with_extension("flac");
+    flac::encode_wav_to_flac(&job.wav, &staged, fidelity.flac_depth())?;
+    let (tags, outcome) = match deezer {
+        Some(client) => metadata::tags_for(client, &job.ended.track),
+        None => (
+            TrackTags::from_spotify(&job.ended.track),
+            TagsOutcome::Unavailable("no HTTP client".into()),
+        ),
+    };
+    let tagged = tags.write_flac(&staged);
     let path = naming::unique_path(&config.output_dir, &naming::file_name(&title, "flac"));
-    flac::encode_wav_to_flac(&job.wav, &path, fidelity.flac_depth())?;
+    std::fs::rename(&staged, &path)?;
+    tagged?;
     Ok(RecorderEvent::Saved {
         title,
         path,
         fidelity,
         duration,
+        tags: outcome,
     })
 }
