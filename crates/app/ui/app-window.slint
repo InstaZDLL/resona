@@ -50,7 +50,7 @@ component QualityBadge inherits Rectangle {
         : root.track.format;
     property <color> tint: root.track.state == TrackState.recording ? #e5484d
         : root.track.state != TrackState.saved ? #8e8e93
-        : root.track.quality == Quality.bit-perfect ? #1db954
+        : root.track.quality == Quality.bit-perfect ? #16a34a
         : root.track.quality == Quality.processed ? #d97706
         : #0a84ff;
     visible: root.label != "";
@@ -84,7 +84,7 @@ component TrackLine inherits Rectangle {
                 : root.track.state == TrackState.already-recorded ? "↷"
                 : "✘";
             color: root.track.state == TrackState.recording ? #e5484d
-                : root.track.state == TrackState.saved ? #1db954
+                : root.track.state == TrackState.saved ? #16a34a
                 : #8e8e93;
         }
         Text {
@@ -295,7 +295,7 @@ export component AppWindow inherits Window {
                     width: 64px;
                     height: 64px;
                     border-radius: 6px;
-                    background: root.spotify-state == SpotifyState.playing ? #1db95426 : #0000000d;
+                    background: root.spotify-state == SpotifyState.playing ? #2563eb26 : #0000000d;
                     clip: true;
                     property <bool> cover-shown: root.has-cover && (root.spotify-state == SpotifyState.playing || root.spotify-state == SpotifyState.paused);
                     if cover-shown: Image {
@@ -429,7 +429,9 @@ export component AppWindow inherits Window {
             border-radius: 24px;
             background: root.finishing ? #c7c7cc
                 : root.recording ? (touch.has-hover ? #d13438 : #e5484d)
-                : (touch.has-hover ? #17a34a : #1db954);
+                // The logo's blue. (No gradient: the software renderer then
+                // loses the rounded corners.)
+                : (touch.has-hover ? #1d4ed8 : #2563eb);
             Text {
                 text: root.finishing ? @tr("Finishing the last track…")
                     : root.playlist-running ? @tr("■  Stop the playlist")
