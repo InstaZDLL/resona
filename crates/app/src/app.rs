@@ -14,7 +14,11 @@ use spytify_core::analysis::Fidelity;
 use spytify_core::audio_setup::{CableAsDefault, SetupIssue};
 use spytify_core::metadata::TagsOutcome;
 use spytify_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
+use spytify_core::recorder::playlist_session::{
+    Entry, EntryState, PlaylistEvent, PlaylistSession, Source,
+};
 use spytify_core::settings::Settings;
+use spytify_core::spotify::link::SpotifyLink;
 use spytify_core::spotify::monitor::{Monitor, MonitorEvent};
 use spytify_core::spotify::state::{Content, Event};
 use spytify_core::spotify::title::TrackTitle;
@@ -25,8 +29,16 @@ use crate::tray::Tray;
 use crate::{AppWindow, Notice, Quality, Reason, SpotifyState, TrackRow, TrackState, Warning};
 
 pub fn run() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::WARN)
+    // lofty warns on every FLAC it tags that it adds a padding block: our
+    // encoder writes none, which is fine.
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_default(tracing::Level::WARN)
+                .with_target("lofty", tracing::Level::ERROR),
+        )
         .init();
     let settings = Rc::new(RefCell::new(Settings::load()));
     let window = AppWindow::new()?;
@@ -64,7 +76,7 @@ pub fn run() -> anyhow::Result<()> {
     });
     forward(shown_rx, window.as_weak(), on_monitor_event);
 
-    let recorder: Rc<RefCell<Option<Recorder>>> = Rc::default();
+    let running: Rc<RefCell<Option<Running>>> = Rc::default();
     let started: Rc<Cell<Option<Instant>>> = Rc::default();
 
     let timer = slint::Timer::default();
@@ -81,46 +93,54 @@ pub fn run() -> anyhow::Result<()> {
             },
         );
     }
+    let session = Session {
+        settings: Rc::clone(&settings),
+        running: Rc::clone(&running),
+        started: Rc::clone(&started),
+        notices: Rc::clone(&notices),
+    };
 
     window.on_toggle_recording({
         let weak = window.as_weak();
-        let settings = Rc::clone(&settings);
-        let recorder = Rc::clone(&recorder);
-        let started = Rc::clone(&started);
-        let (tracks, notices) = (Rc::clone(&tracks), Rc::clone(&notices));
+        let session = session.clone();
+        move || {
+            if let Some(window) = weak.upgrade() {
+                if window.get_recording() {
+                    session.stop(&window);
+                } else {
+                    session.start(&window, None);
+                }
+            }
+        }
+    });
+
+    window.on_record_playlist({
+        let weak = window.as_weak();
+        let session = session.clone();
         move || {
             let Some(window) = weak.upgrade() else { return };
-            if let Some(running) = recorder.borrow_mut().take() {
-                // Stopping waits for the last track to be encoded and
-                // tagged: off the UI thread.
-                window.set_finishing(true);
-                started.set(None);
-                let weak = window.as_weak();
-                thread::spawn(move || {
-                    running.stop();
-                    let _ = weak.upgrade_in_event_loop(|w| {
-                        w.set_finishing(false);
-                        w.set_recording(false);
-                    });
-                });
+            if window.get_recording() {
                 return;
             }
-            tracks.set_vec(Vec::new());
-            notices.set_vec(Vec::new());
-            window.set_saved_count(0);
-            match Recorder::start(settings.borrow().recorder_config()) {
-                Ok((running, events)) => {
-                    *recorder.borrow_mut() = Some(running);
-                    started.set(Some(Instant::now()));
-                    window.set_elapsed(mapping::clock(Duration::ZERO).into());
-                    window.set_recording(true);
-                    forward(events, window.as_weak(), on_recorder_event);
-                }
-                Err(e) => notices.push(Notice {
+            match SpotifyLink::parse(&window.get_playlist_link()) {
+                Ok(link) => session.start(&window, Some(Source::Link(link))),
+                Err(e) => session.notices.push(Notice {
                     kind: Warning::Error,
                     detail: e.to_string().into(),
                     ..Notice::default()
                 }),
+            }
+        }
+    });
+
+    window.on_retry_missed({
+        let weak = window.as_weak();
+        let session = session.clone();
+        move || {
+            let Some(window) = weak.upgrade() else { return };
+            let (name, entries) = MISSED.with_borrow(Clone::clone);
+            if !window.get_recording() && !entries.is_empty() {
+                session.start(&window, Some(Source::Entries { name, entries }));
             }
         }
     });
@@ -283,11 +303,226 @@ pub fn run() -> anyhow::Result<()> {
     slint::run_event_loop_until_quit()?;
 
     // Quitting while recording keeps what was recorded.
-    if let Some(running) = recorder.borrow_mut().take() {
+    if let Some(running) = running.borrow_mut().take() {
         running.stop();
     }
     monitor.stop();
     Ok(())
+}
+
+/// What the record button stops.
+enum Running {
+    Free(Recorder),
+    Playlist(PlaylistSession),
+}
+
+impl Running {
+    fn stop(self) {
+        match self {
+            Self::Free(recorder) => recorder.stop(),
+            Self::Playlist(session) => session.stop(),
+        }
+    }
+}
+
+thread_local! {
+    /// The list entry the latest playlist event was about: the recorder
+    /// event that follows it (saved, discarded) belongs to that row.
+    static LAST_ENTRY: Cell<Option<usize>> = const { Cell::new(None) };
+    /// The entries the last playlist run missed, for "retry".
+    static MISSED: RefCell<(String, Vec<Entry>)> = RefCell::default();
+}
+
+/// Starting and stopping a recording, free or of a playlist.
+#[derive(Clone)]
+struct Session {
+    settings: Rc<RefCell<Settings>>,
+    running: Rc<RefCell<Option<Running>>>,
+    started: Rc<Cell<Option<Instant>>>,
+    notices: Rc<VecModel<Notice>>,
+}
+
+impl Session {
+    /// Records everything Spotify plays, or the playlist `source`.
+    fn start(&self, window: &AppWindow, source: Option<Source>) {
+        // A playlist run that ended on its own is still held here.
+        if let Some(finished) = self.running.borrow_mut().take() {
+            thread::spawn(move || finished.stop());
+        }
+        self.notices.set_vec(Vec::new());
+        window.set_saved_count(0);
+        window.set_missed_count(0);
+        window.set_playlist_name(SharedString::new());
+        let config = self.settings.borrow().recorder_config();
+        let started = match source {
+            None => Recorder::start(config).map(|(recorder, events)| {
+                forward(events, window.as_weak(), on_recorder_event);
+                Running::Free(recorder)
+            }),
+            Some(source) => PlaylistSession::start(config, source).map(|(session, events)| {
+                LAST_ENTRY.set(None);
+                window.set_playlist_running(true);
+                forward(events, window.as_weak(), on_playlist_event);
+                Running::Playlist(session)
+            }),
+        };
+        match started {
+            Ok(running) => {
+                *self.running.borrow_mut() = Some(running);
+                self.started.set(Some(Instant::now()));
+                window.set_elapsed(mapping::clock(Duration::ZERO).into());
+                window.set_recording(true);
+            }
+            Err(e) => self.notices.push(Notice {
+                kind: Warning::Error,
+                detail: e.to_string().into(),
+                ..Notice::default()
+            }),
+        }
+    }
+
+    /// Stopping waits for the last track to be encoded and tagged: off the
+    /// UI thread.
+    fn stop(&self, window: &AppWindow) {
+        let Some(running) = self.running.borrow_mut().take() else {
+            window.set_recording(false);
+            return;
+        };
+        window.set_finishing(true);
+        self.started.set(None);
+        let weak = window.as_weak();
+        thread::spawn(move || {
+            running.stop();
+            let _ = weak.upgrade_in_event_loop(|w| {
+                w.set_finishing(false);
+                w.set_recording(false);
+                w.set_playlist_running(false);
+            });
+        });
+    }
+}
+
+fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
+    let tracks = window.get_tracks();
+    let Some(tracks) = tracks.as_any().downcast_ref::<VecModel<TrackRow>>() else {
+        return;
+    };
+    match event {
+        PlaylistEvent::Loaded { name, entries } => {
+            window.set_playlist_name(name.into());
+            window.set_playlist_total(entries.len() as i32);
+            window.set_playlist_done(0);
+            tracks.set_vec(
+                entries
+                    .iter()
+                    .map(|entry| TrackRow {
+                        title: format!("{} - {}", entry.artists.join(", "), entry.title).into(),
+                        length: entry
+                            .duration
+                            .map(mapping::length)
+                            .unwrap_or_default()
+                            .into(),
+                        state: TrackState::Waiting,
+                        ..TrackRow::default()
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        PlaylistEvent::Entry { index, state } => {
+            LAST_ENTRY.set(Some(index));
+            if let Some(mut row) = tracks.row_data(index) {
+                row.state = match state {
+                    EntryState::Waiting => TrackState::Waiting,
+                    EntryState::Recording => TrackState::Recording,
+                    EntryState::Saved => TrackState::Saved,
+                    EntryState::AlreadyRecorded => TrackState::AlreadyRecorded,
+                    EntryState::Missed => TrackState::Failed,
+                };
+                tracks.set_row_data(index, row);
+            }
+            let done = tracks
+                .iter()
+                .filter(|r| matches!(r.state, TrackState::Saved | TrackState::AlreadyRecorded))
+                .count();
+            window.set_playlist_done(done as i32);
+        }
+        PlaylistEvent::Recorder(event) => {
+            let row = LAST_ENTRY
+                .get()
+                .and_then(|i| Some((i, tracks.row_data(i)?)));
+            match (*event, row) {
+                (
+                    RecorderEvent::Saved {
+                        fidelity,
+                        duration,
+                        tags,
+                        path,
+                        ..
+                    },
+                    Some((index, mut row)),
+                ) if row.state == TrackState::Saved => {
+                    describe(&mut row, fidelity, duration);
+                    row.tagged = tags == TagsOutcome::Deezer;
+                    row.format = extension(&path).into();
+                    tracks.set_row_data(index, row);
+                    window.set_saved_count(window.get_saved_count() + 1);
+                }
+                (
+                    RecorderEvent::Discarded {
+                        reason,
+                        fidelity,
+                        duration,
+                        ..
+                    },
+                    Some((index, mut row)),
+                ) if row.state == TrackState::Failed => {
+                    describe(&mut row, fidelity, duration);
+                    row.state = TrackState::Discarded;
+                    row.reason = reason_of(reason);
+                    tracks.set_row_data(index, row);
+                }
+                // The list rows stand for these.
+                (
+                    RecorderEvent::Recording(_)
+                    | RecorderEvent::AlreadyRecorded { .. }
+                    | RecorderEvent::Saved { .. }
+                    | RecorderEvent::Discarded { .. },
+                    _,
+                ) => {}
+                (event, _) => on_recorder_event(window, event),
+            }
+        }
+        PlaylistEvent::Error(message) => {
+            let notices = window.get_notices();
+            if let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() {
+                notices.push(Notice {
+                    kind: Warning::Error,
+                    detail: message.into(),
+                    ..Notice::default()
+                });
+            }
+        }
+        PlaylistEvent::Finished { name, missed } => {
+            window.set_missed_count(missed.len() as i32);
+            MISSED.set((name, missed));
+            window.set_recording(false);
+            window.set_playlist_running(false);
+        }
+    }
+}
+
+fn extension(path: &std::path::Path) -> String {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_uppercase())
+        .unwrap_or_default()
+}
+
+fn reason_of(reason: DiscardReason) -> Reason {
+    match reason {
+        DiscardReason::Partial => Reason::Partial,
+        DiscardReason::TooShort => Reason::TooShort,
+        DiscardReason::AlreadyRecorded => Reason::AlreadyRecorded,
+    }
 }
 
 fn select_language(language: spytify_core::settings::Language) {
@@ -451,11 +686,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             let mut saved = row(&title, TrackState::Saved);
             describe(&mut saved, fidelity, duration);
             saved.tagged = tags == TagsOutcome::Deezer;
-            saved.format = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_uppercase())
-                .unwrap_or_default()
-                .into();
+            saved.format = extension(&path).into();
             replace_recording(tracks, &title, saved);
             window.set_saved_count(window.get_saved_count() + 1);
             if fidelity == Fidelity::Processed {
@@ -474,11 +705,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
         } => {
             let mut discarded = row(&title, TrackState::Discarded);
             describe(&mut discarded, fidelity, duration);
-            discarded.reason = match reason {
-                DiscardReason::Partial => Reason::Partial,
-                DiscardReason::TooShort => Reason::TooShort,
-                DiscardReason::AlreadyRecorded => Reason::AlreadyRecorded,
-            };
+            discarded.reason = reason_of(reason);
             replace_recording(tracks, &title, discarded);
         }
         RecorderEvent::Error(message) => {

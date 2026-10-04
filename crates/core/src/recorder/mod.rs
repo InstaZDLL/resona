@@ -5,7 +5,10 @@ pub mod boundary;
 pub mod clock;
 pub mod library;
 pub mod naming;
+pub mod playlist;
 pub mod splitter;
 
 #[cfg(windows)]
 pub mod engine;
+#[cfg(windows)]
+pub mod playlist_session;

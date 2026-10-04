@@ -184,6 +184,18 @@ Porter `frmEspionSpotify` : bouton d'enregistrement, console de logs, réglages 
 - i18n : `@tr()` + gettext, `fr` et `en`. Remplace les `.resx`, `TranslationKeys` et `I18NKeys`.
 - Réglages : un fichier TOML dans `%APPDATA%\Spytify`.
 
+### Phase 5 bis — Mode playlist (4 octobre 2026)
+
+On colle un lien de playlist, d'album ou de morceau ; l'appli enregistre toute la liste et s'arrête seule.
+
+- **Pilotage par `spotify_cli.exe`**, l'outil en ligne de commande que Spotify livre avec son client (build Microsoft Store 1.3.1.234, alias dans `%LOCALAPPDATA%\Microsoft\WindowsApps`). Réponses JSON, 0,3 s par appel. Testé : `playlist get` lit les playlists **privées** et les albums en entier (150 morceaux d'un coup), `play <uri>` lance la playlist depuis le début, `shuffle off`, `repeat off`, `now-playing`, `lookup --fields duration`. À vérifier : présence dans l'installateur classique de spotify.com.
+- Écartés : la page d'intégration publique (`open.spotify.com/embed/…`, 100 morceaux au plus, 404 sur les playlists privées) ; le suffixe `:play` (ne lance pas la lecture) ; l'automatisation d'interface (Spotify n'expose pas ses boutons) ; l'injection par le port de débogage de Chromium (ce que fait Sidify, fragile et contraire aux conditions de Spotify).
+- `spotify::link` (liens web ou `spotify:`), `spotify::cli` (appels sans fenêtre, délai maximal, analyse JSON testée sur des réponses réelles).
+- `recorder::playlist` (pur, testé) : `Plan` dit, d'après `now-playing`, quoi faire (attendre, lancer le morceau suivant, finir). Fin : un morceau hors de la liste (lecture automatique) ou un retour au début. `entry_for` rattache un enregistrement à son entrée par le titre.
+- `recorder::playlist_session` : aléatoire et répétition coupés, volume de Spotify à 100 %, enregistreur démarré avant la lecture, sondage chaque seconde, pause de Spotify à la fin, bilan des manquants. « Réessayer les manquants » les relance un par un (mode `Tracks`).
+- Interface : champ de lien, liste affichée d'avance (○ en attente), en-tête « nom · fait / total », lien « Réessayer les N manquants ». Exemple `record_playlist <lien>`.
+- Mesuré sur « BEST JP » (privée, 5 morceaux en 16 bits, par le câble) : 5 / 5 enregistrés, pause à l'arrivée de la lecture automatique. 阿修羅ちゃん bit-perfect 16 bits ; ダンスホール et Hi-Five crêtes limitées ; Flow et ヨワネハキ légèrement modifiés (proche de la grille 24 bits) alors qu'ils sont en 16 bits : traitement de Spotify lui-même, la même session ayant donné un bit-perfect. Clip vidéo écarté (lecture audio par défaut). L'étiquette « quasi sans perte, 24 bits » devient « légèrement modifié par Spotify ».
+
 ### Phase 6 — Distribution
 
 - CI GitHub Actions sur `windows-latest` : `cargo fmt --check`, `clippy -D warnings`, `cargo test`.

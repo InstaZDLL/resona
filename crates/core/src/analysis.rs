@@ -25,7 +25,7 @@ pub struct BitAnalysis {
     block: Block,
     loud: Share,
     quiet: Share,
-    /// Off-grid samples in the first [`HEAD_SAMPLES`], for
+    /// Samples off the 16-bit grid in the first [`HEAD_SAMPLES`], for
     /// [`Self::fades_in`].
     head_off: u64,
 }
@@ -63,9 +63,12 @@ pub enum Fidelity {
     /// at a pause or a buffer hiccup, a few hundred per track at most):
     /// they are rounded to `depth` rather than making the whole track 24-bit.
     BitPerfect { depth: u8, touched: u64 },
-    /// Off the 24-bit grid by a small fraction of a step on some samples,
-    /// as Spotify's own 24-bit path does (see `docs/PLAN.md`, point 3 bis).
-    /// Rounding to 24 bits restores the source except on exact half steps.
+    /// Off the 24-bit grid by a small fraction of a step on some samples:
+    /// Spotify processed the track lightly itself (its 24-bit path, see
+    /// `docs/PLAN.md` point 3 bis, and some 16-bit tracks: Flow and
+    /// ヨワネハキ on 2026-10-04, in the same run as a bit-perfect one). Kept
+    /// at 24 bits, as captured. Shown as "slightly changed by Spotify",
+    /// not as a 24-bit source.
     NearTransparent,
     /// Samples changed only around the loudest peaks (within 3 dB of full
     /// scale), the rest exact: Spotify limits some tracks (measured on a
@@ -119,10 +122,9 @@ impl BitAnalysis {
             // Multiplying by a power of two is exact in f32, so these
             // comparisons have no rounding slack to account for.
             let scaled_24 = sample * SCALE_24;
+            let in_head = self.samples <= HEAD_SAMPLES;
             if scaled_24 != scaled_24.round() {
-                if self.samples <= HEAD_SAMPLES {
-                    self.head_off += 1;
-                }
+                self.head_off += u64::from(in_head);
                 let exact = f64::from(sample) * f64::from(SCALE_24);
                 self.residual_24 += (exact - exact.round()).abs();
                 self.block.off += 1;
@@ -132,6 +134,7 @@ impl BitAnalysis {
             }
             let scaled_16 = sample * SCALE_16;
             if scaled_16 != scaled_16.round() {
+                self.head_off += u64::from(in_head);
                 self.not_16_bit += 1;
             }
         }
@@ -228,17 +231,19 @@ impl BitAnalysis {
     }
 
     /// The track starts with a volume ramp Spotify added: its first 2 s
-    /// are almost all off the grid while the rest is mostly on it. That is
-    /// crossfade or Automix (measured 2026-10-03: 99.5 % then 0.5 to 2 %;
-    /// with normalization on top, 30 %). A fade in the source itself stays
-    /// on the grid.
+    /// are almost all off the 16-bit grid while the rest is mostly on it.
+    /// (A 24-bit source is off that grid everywhere: never flagged.) That is
+    /// crossfade or Automix (measured 2026-10-03: 99.5 % over both seconds,
+    /// then 0.5 to 2 %; with normalization on top, 30 %). A fade in the
+    /// source itself stays on the grid; a quiet intro Spotify touched over
+    /// half a second (97 % then 32 %, 2026-10-04) is not a crossfade.
     pub fn fades_in(&self) -> bool {
         if self.samples <= HEAD_SAMPLES * 2 {
             return false;
         }
         let head = self.head_off as f64 / HEAD_SAMPLES as f64;
-        let body = (self.not_24_bit - self.head_off) as f64 / (self.samples - HEAD_SAMPLES) as f64;
-        head >= 0.5 && body <= head / 2.0
+        let body = (self.not_16_bit - self.head_off) as f64 / (self.samples - HEAD_SAMPLES) as f64;
+        head >= 0.9 && body <= head / 2.0
     }
 
     /// Smallest integer depth that holds the capture without loss, or
@@ -435,6 +440,20 @@ mod tests {
     fn crossfade_ramp_at_the_start_is_noticed() {
         assert!(analyse(&with_ramp(2 * 44_100 * 2)).fades_in());
         assert!(!analyse(&with_ramp(0)).fades_in());
+    }
+
+    #[test]
+    fn a_short_touched_intro_is_not_a_crossfade() {
+        // Half a second ramped, as the 2026-10-04 quiet intro.
+        assert!(!analyse(&with_ramp(44_100)).fades_in());
+    }
+
+    #[test]
+    fn a_24_bit_source_is_never_flagged() {
+        let samples: Vec<f32> = (0_u64..10 * 44_100 * 2)
+            .map(|i| ((i * 7_919) % 5_000_000) as f32 / SCALE_24)
+            .collect();
+        assert!(!analyse(&samples).fades_in());
     }
 
     #[test]

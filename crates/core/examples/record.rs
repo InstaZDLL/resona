@@ -14,8 +14,16 @@ fn main() -> anyhow::Result<()> {
     use spytify_core::recorder::engine::Recorder;
     use spytify_core::settings::Settings;
 
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::WARN)
+    // lofty warns on every FLAC it tags that it adds a padding block: our
+    // encoder writes none, which is fine.
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_default(tracing::Level::WARN)
+                .with_target("lofty", tracing::Level::ERROR),
+        )
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut settings = Settings::load();
