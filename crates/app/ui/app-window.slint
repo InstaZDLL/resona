@@ -1,7 +1,7 @@
 import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox } from "std-widgets.slint";
 
 export enum SpotifyState { not-running, idle, playing, paused, ad }
-export enum TrackState { recording, saved, discarded, already-recorded, failed }
+export enum TrackState { waiting, recording, saved, discarded, already-recorded, failed }
 /// Quality of a saved or discarded track, from the fidelity analysis.
 export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
 export enum Reason { none, partial, too-short, already-recorded }
@@ -35,7 +35,8 @@ component Card inherits Rectangle {
 
 component QualityBadge inherits Rectangle {
     in property <TrackRow> track;
-    property <string> label: root.track.state == TrackState.recording ? @tr("recording…")
+    property <string> label: root.track.state == TrackState.waiting ? ""
+        : root.track.state == TrackState.recording ? @tr("recording…")
         : root.track.state == TrackState.already-recorded ? @tr("already recorded")
         : root.track.state == TrackState.failed ? @tr("error")
         : root.track.state == TrackState.discarded ? (
@@ -43,7 +44,7 @@ component QualityBadge inherits Rectangle {
             : root.track.reason == Reason.too-short ? @tr("too short")
             : @tr("already recorded"))
         : root.track.quality == Quality.bit-perfect ? @tr("bit-perfect {}-bit", root.track.depth)
-        : root.track.quality == Quality.near-transparent ? @tr("near-lossless 24-bit")
+        : root.track.quality == Quality.near-transparent ? @tr("slightly changed by Spotify")
         : root.track.quality == Quality.peak-limited ? @tr("peaks limited by Spotify")
         : root.track.quality == Quality.processed ? @tr("altered")
         : root.track.format;
@@ -52,6 +53,7 @@ component QualityBadge inherits Rectangle {
         : root.track.quality == Quality.bit-perfect ? #1db954
         : root.track.quality == Quality.processed ? #d97706
         : #0a84ff;
+    visible: root.label != "";
     border-radius: 4px;
     background: tint.with-alpha(0.12);
     height: 20px;
@@ -76,7 +78,8 @@ component TrackLine inherits Rectangle {
         Text {
             width: 16px;
             vertical-alignment: center;
-            text: root.track.state == TrackState.recording ? "●"
+            text: root.track.state == TrackState.waiting ? "○"
+                : root.track.state == TrackState.recording ? "●"
                 : root.track.state == TrackState.saved ? "✔"
                 : root.track.state == TrackState.already-recorded ? "↷"
                 : "✘";
@@ -211,6 +214,15 @@ export component AppWindow inherits Window {
     in property <[Notice]> notices;
     in property <int> saved-count;
 
+    // Playlist mode
+    in-out property <string> playlist-link;
+    in property <bool> playlist-running;
+    in property <string> playlist-name;
+    in property <int> playlist-done;
+    in property <int> playlist-total;
+    /// Entries of the last playlist run not recorded.
+    in property <int> missed-count;
+
     // Settings, written back by the panel
     in-out property <string> output-dir;
     in-out property <int> quality-index: 2;
@@ -229,6 +241,8 @@ export component AppWindow inherits Window {
     in property <string> cable-name;
 
     callback toggle-recording();
+    callback record-playlist();
+    callback retry-missed();
     callback browse-output();
     callback open-output();
     callback open-cable-site();
@@ -315,9 +329,9 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         Text {
                             text: root.spotify-state == SpotifyState.playing ? @tr("▶ Playing")
-                                : root.spotify-state == SpotifyState.paused ? @tr("⏸ Paused")
+                                : root.spotify-state == SpotifyState.paused ? (root.recording ? @tr("⏸ Paused: press play in Spotify") : @tr("⏸ Paused"))
                                 : root.spotify-state == SpotifyState.ad ? @tr("Ad, not recorded")
-                                : root.spotify-state == SpotifyState.idle ? @tr("Spotify is open")
+                                : root.spotify-state == SpotifyState.idle ? (root.recording ? @tr("Play something in Spotify") : @tr("Spotify is open"))
                                 : @tr("Start Spotify to record");
                             color: #6e6e73;
                             font-size: 12px;
@@ -366,6 +380,22 @@ export component AppWindow inherits Window {
             }
         }
 
+        // Playlist or album link
+        if !root.recording: HorizontalLayout {
+            spacing: 8px;
+            LineEdit {
+                placeholder-text: @tr("Spotify playlist or album link");
+                text <=> root.playlist-link;
+                horizontal-stretch: 1;
+                accepted => { root.record-playlist(); }
+            }
+            Button {
+                text: @tr("Record it");
+                enabled: root.playlist-link != "";
+                clicked => { root.record-playlist(); }
+            }
+        }
+
         // Record button
         Rectangle {
             height: 48px;
@@ -375,6 +405,7 @@ export component AppWindow inherits Window {
                 : (touch.has-hover ? #17a34a : #1db954);
             Text {
                 text: root.finishing ? @tr("Finishing the last track…")
+                    : root.playlist-running ? @tr("■  Stop the playlist")
                     : root.recording ? @tr("■  Stop recording")
                     : @tr("●  Start recording");
                 color: white;
@@ -394,11 +425,23 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 HorizontalLayout {
                     padding: 12px;
+                    spacing: 12px;
                     Text {
-                        text: @tr("This session · {} saved", root.saved-count);
+                        text: root.playlist-name != ""
+                            ? @tr("{} · {} / {}", root.playlist-name, root.playlist-done, root.playlist-total)
+                            : @tr("This session · {} saved", root.saved-count);
                         font-weight: 700;
                         color: #1d1d1f;
+                        overflow: elide;
                         horizontal-stretch: 1;
+                    }
+                    if !root.recording && root.missed-count > 0: Text {
+                        text: @tr("Retry the {} missed", root.missed-count);
+                        color: #0a84ff;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.retry-missed(); }
+                        }
                     }
                     Text {
                         text: @tr("Open folder");

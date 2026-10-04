@@ -23,8 +23,8 @@ msgstr "trop court"
 msgid "bit-perfect {}-bit"
 msgstr "bit-perfect {} bits"
 
-msgid "near-lossless 24-bit"
-msgstr "quasi sans perte, 24 bits"
+msgid "slightly changed by Spotify"
+msgstr "légèrement modifié par Spotify"
 
 msgid "peaks limited by Spotify"
 msgstr "crêtes limitées par Spotify"
@@ -218,3 +218,25 @@ msgstr "Pour enregistrer sans perte : Spotify en qualité Lossless, volume au ma
 
 msgid "⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off."
 msgstr "⚠ « {} » commence par un fondu ajouté par Spotify : le fondu enchaîné ou Automix est activé, et les changements de morceau ne sont pas sans perte. Spotify → Paramètres → Lecture → désactivez Fondu enchaîné et Automix."
+
+# Playlist mode
+msgid "Spotify playlist or album link"
+msgstr "Lien de playlist ou d'album Spotify"
+
+msgid "Record it"
+msgstr "Enregistrer"
+
+msgid "■  Stop the playlist"
+msgstr "■  Arrêter la playlist"
+
+msgid "{} · {} / {}"
+msgstr "{} · {} / {}"
+
+msgid "Retry the {} missed"
+msgstr "Réessayer les {} manquants"
+
+msgid "⏸ Paused: press play in Spotify"
+msgstr "⏸ En pause : lancez la lecture dans Spotify"
+
+msgid "Play something in Spotify"
+msgstr "Lancez une lecture dans Spotify"

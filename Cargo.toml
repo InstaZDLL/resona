@@ -12,3 +12,12 @@ repository = "https://github.com/InstaZDLL/spytify"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# The engine checks every sample and encodes FLAC as the music plays: in
+# an unoptimized build it fell behind real time (tracks shown 20 s late,
+# 2026-10-04). Dependencies and the engine are optimized even in dev.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.spytify-core]
+opt-level = 3

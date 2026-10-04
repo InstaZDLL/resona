@@ -5,6 +5,17 @@ pub enum Error {
     #[error("Spotify is not running")]
     SpotifyNotRunning,
 
+    #[error(
+        "spotify_cli.exe not found: Spotify's command-line tool comes with recent Spotify builds"
+    )]
+    SpotifyCliMissing,
+
+    #[error("Spotify did not do it: {0}")]
+    SpotifyCli(String),
+
+    #[error("not a Spotify playlist, album or track link: {0}")]
+    NotASpotifyLink(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
