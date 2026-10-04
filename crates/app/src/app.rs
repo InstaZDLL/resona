@@ -19,7 +19,9 @@ use spytify_core::spotify::monitor::{Monitor, MonitorEvent};
 use spytify_core::spotify::state::{Content, Event};
 use spytify_core::spotify::title::TrackTitle;
 
+use crate::cover::CoverLoader;
 use crate::mapping::{self, at, index_of};
+use crate::tray::Tray;
 use crate::{AppWindow, Notice, Quality, Reason, SpotifyState, TrackRow, TrackState, Warning};
 
 pub fn run() -> anyhow::Result<()> {
@@ -38,7 +40,29 @@ pub fn run() -> anyhow::Result<()> {
 
     // Spotify's state is shown whether recording or not.
     let (monitor, monitor_events) = Monitor::spawn(|| false)?;
-    forward(monitor_events, window.as_weak(), on_monitor_event);
+    // The cover art follows the track the monitor reports.
+    let cover = CoverLoader::spawn(window.as_weak());
+    cover.refresh();
+    let (shown_tx, shown_rx) = crossbeam_channel::unbounded();
+    thread::spawn(move || {
+        for event in monitor_events {
+            if matches!(
+                event,
+                MonitorEvent::Status {
+                    event: Event::ContentChanged { .. }
+                        | Event::DetailsUpdated(_)
+                        | Event::RunningChanged { .. },
+                    ..
+                }
+            ) {
+                cover.refresh();
+            }
+            if shown_tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
+    forward(shown_rx, window.as_weak(), on_monitor_event);
 
     let recorder: Rc<RefCell<Option<Recorder>>> = Rc::default();
     let started: Rc<Cell<Option<Instant>>> = Rc::default();
@@ -218,9 +242,47 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
 
-    window.run()?;
+    // Closing the window during a recording sends it to the notification
+    // area; otherwise it quits.
+    let tray = match Tray::new(&window.as_weak()) {
+        Ok(tray) => Some(Rc::new(RefCell::new(tray))),
+        Err(e) => {
+            tracing::warn!("no notification area icon: {e}");
+            None
+        }
+    };
+    window.window().on_close_requested({
+        let weak = window.as_weak();
+        let in_tray = tray.is_some();
+        move || {
+            let recording = weak.upgrade().is_some_and(|w| w.get_recording());
+            if !(recording && in_tray) {
+                let _ = slint::quit_event_loop();
+            }
+            slint::CloseRequestResponse::HideWindow
+        }
+    });
+    let tray_timer = slint::Timer::default();
+    if let Some(tray) = &tray {
+        let weak = window.as_weak();
+        let settings = Rc::clone(&settings);
+        let tray = Rc::clone(tray);
+        tray_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(250),
+            move || {
+                if let Some(window) = weak.upgrade() {
+                    tray.borrow_mut()
+                        .update(window.get_recording(), settings.borrow().language);
+                }
+            },
+        );
+    }
 
-    // Closing the window while recording keeps what was recorded.
+    window.show()?;
+    slint::run_event_loop_until_quit()?;
+
+    // Quitting while recording keeps what was recorded.
     if let Some(running) = recorder.borrow_mut().take() {
         running.stop();
     }

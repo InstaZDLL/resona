@@ -4,7 +4,11 @@ slint::include_modules!();
 
 #[cfg(windows)]
 mod app;
+#[cfg(windows)]
+mod cover;
 mod mapping;
+#[cfg(windows)]
+mod tray;
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
