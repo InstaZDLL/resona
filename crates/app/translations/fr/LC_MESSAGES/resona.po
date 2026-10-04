@@ -186,9 +186,6 @@ msgstr "Sortie audio"
 msgid "Play Spotify through a virtual cable"
 msgstr "Faire passer Spotify par un câble virtuel"
 
-msgid "Install VB-Cable (vb-audio.com/Cable) to use it. Your headset's settings (44100 Hz, enhancements, surround) then no longer affect the recordings."
-msgstr "Installez VB-Cable (vb-audio.com/Cable) pour l'utiliser. Les réglages de votre casque (44100 Hz, améliorations, son surround) n'affecteront alors plus les enregistrements."
-
 msgid "While recording, Spotify plays silently on \"{}\", set up by Resona: your headset's settings no longer affect the recordings, and you can listen to something else."
 msgstr "Pendant l'enregistrement, Spotify joue en silence sur « {} », réglé par Resona : les réglages de votre casque n'affectent plus les enregistrements, et vous pouvez écouter autre chose."
 
@@ -305,3 +302,25 @@ msgstr "⚠ Le périphérique de sortie par défaut n'a pas pu être changé."
 
 msgid "⚠ Something went wrong."
 msgstr "⚠ Une erreur s'est produite."
+
+# Settings navigation
+msgid "Audio"
+msgstr "Audio"
+
+msgid "Changes are saved automatically"
+msgstr "Les modifications sont enregistrées automatiquement"
+
+msgid "Install VB-Cable to isolate recordings from your headset settings."
+msgstr "Installez VB-Cable pour isoler les enregistrements des réglages du casque."
+
+msgid "Records independently of your headset. Enable monitoring below to listen."
+msgstr "Enregistrement indépendant du casque. Activez l’écoute ci-dessous pour entendre Spotify."
+
+msgid "Hide audio tips"
+msgstr "Masquer les conseils audio"
+
+msgid "Tips for lossless audio"
+msgstr "Conseils pour un son sans perte"
+
+msgid "Your music, saved here"
+msgstr "Votre musique, à retrouver ici"
