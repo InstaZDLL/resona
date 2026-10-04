@@ -157,8 +157,9 @@ fn print_event(event: resona_core::recorder::engine::RecorderEvent) {
             fidelity,
             duration,
             tags,
+            lyrics,
         } => println!(
-            "✔ saved      {title}  [{}, {}, tags: {}]  → {}",
+            "✔ saved      {title}  [{}, {}, tags: {}, lyrics: {lyrics:?}]  → {}",
             length(duration),
             quality(fidelity),
             describe_tags(&tags),

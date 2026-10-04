@@ -5,6 +5,7 @@
 
 pub mod deezer;
 pub mod lookup;
+pub mod lyrics;
 pub mod name_match;
 pub mod spotify;
 pub mod tags;
