@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use resona_core::analysis::Fidelity;
 use resona_core::audio_setup::{CableAsDefault, SetupIssue};
+use resona_core::problem::{Problem, ProblemKind};
 use resona_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
 use resona_core::recorder::playlist_session::{
     Entry, EntryState, PlaylistEvent, PlaylistSession, Source,
@@ -27,7 +28,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use crate::cover::CoverLoader;
 use crate::mapping::{self, at, index_of};
 use crate::tray::Tray;
-use crate::{AppWindow, Notice, Quality, Reason, SpotifyState, TrackRow, TrackState, Warning};
+use crate::{
+    AppWindow, Failure, Notice, Quality, Reason, SpotifyState, TrackRow, TrackState, Warning,
+};
 
 pub fn run() -> anyhow::Result<()> {
     // lofty warns on every FLAC it tags that it adds a padding block: our
@@ -132,11 +135,7 @@ pub fn run() -> anyhow::Result<()> {
             }
             match SpotifyLink::parse(&window.get_playlist_link()) {
                 Ok(link) => session.start(&window, Some(Source::Link(link))),
-                Err(e) => session.notices.push(Notice {
-                    kind: Warning::Error,
-                    detail: e.to_string().into(),
-                    ..Notice::default()
-                }),
+                Err(e) => session.notices.push(error_notice(&Problem::from(&e))),
             }
         }
     });
@@ -231,11 +230,7 @@ pub fn run() -> anyhow::Result<()> {
                         .filter(|n| n.kind != Warning::SpotifyVolume)
                         .collect();
                     if let Err(e) = result {
-                        kept.push(Notice {
-                            kind: Warning::Error,
-                            detail: e.to_string().into(),
-                            ..Notice::default()
-                        });
+                        kept.push(error_notice(&Problem::from(&e)));
                     }
                     notices.set_vec(kept);
                 });
@@ -296,11 +291,7 @@ pub fn run() -> anyhow::Result<()> {
                         .filter(|n| n.kind != Warning::CableDefault)
                         .collect();
                     if let Err(e) = result {
-                        kept.push(Notice {
-                            kind: Warning::Error,
-                            detail: e.to_string().into(),
-                            ..Notice::default()
-                        });
+                        kept.push(error_notice(&Problem::new(ProblemKind::DefaultDevice, e)));
                     }
                     notices.set_vec(kept);
                 });
@@ -421,11 +412,7 @@ impl Session {
                 window.set_elapsed(mapping::clock(Duration::ZERO).into());
                 window.set_recording(true);
             }
-            Err(e) => self.notices.push(Notice {
-                kind: Warning::Error,
-                detail: e.to_string().into(),
-                ..Notice::default()
-            }),
+            Err(e) => self.notices.push(error_notice(&Problem::from(&e))),
         }
     }
 
@@ -548,14 +535,10 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
                 (event, _) => on_recorder_event(window, event),
             }
         }
-        PlaylistEvent::Error(message) => {
+        PlaylistEvent::Error(problem) => {
             let notices = window.get_notices();
             if let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() {
-                notices.push(Notice {
-                    kind: Warning::Error,
-                    detail: message.into(),
-                    ..Notice::default()
-                });
+                notices.push(error_notice(&problem));
             }
         }
         PlaylistEvent::Finished { name, missed } => {
@@ -718,11 +701,13 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
                         kind: Warning::Enhancements,
                         device: name.clone(),
                         detail: SharedString::new(),
+                        ..Notice::default()
                     },
                     SetupIssue::SampleRate(rate) => Notice {
                         kind: Warning::SampleRate,
                         device: name.clone(),
                         detail: rate.to_string().into(),
+                        ..Notice::default()
                     },
                 });
             }
@@ -762,20 +747,19 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             discarded.reason = reason_of(reason);
             replace_recording(tracks, &title, discarded);
         }
-        RecorderEvent::Error(message) => {
-            // Encoding errors start with the track's display title.
+        RecorderEvent::Error(problem) => {
+            // An encoding error names the track it is about.
             for i in 0..tracks.row_count() {
                 let mut row = tracks.row_data(i).expect("index in range");
-                if row.state == TrackState::Recording && message.starts_with(row.title.as_str()) {
+                if problem.kind == ProblemKind::Encoding
+                    && row.state == TrackState::Recording
+                    && row.title == problem.subject.as_str()
+                {
                     row.state = TrackState::Failed;
                     tracks.set_row_data(i, row);
                 }
             }
-            notices.push(Notice {
-                kind: Warning::Error,
-                detail: message.into(),
-                ..Notice::default()
-            });
+            notices.push(error_notice(&problem));
         }
         RecorderEvent::CableIsDefault(as_default) => show_cable_as_default(window, &as_default),
         RecorderEvent::SpotifyFades(title) => {
@@ -811,6 +795,7 @@ fn show_cable_as_default(window: &AppWindow, as_default: &CableAsDefault) {
         kind: Warning::CableDefault,
         device: name.into(),
         detail: id.into(),
+        ..Notice::default()
     });
 }
 
@@ -893,6 +878,7 @@ fn note_processed(notices: &VecModel<Notice>, title: &TrackTitle) {
             kind: Warning::Processed,
             device: "1".into(),
             detail: title.to_string().into(),
+            ..Notice::default()
         }),
     }
 }
@@ -943,8 +929,35 @@ fn check_for_update(window: Weak<AppWindow>) {
                     kind: Warning::Update,
                     device: release.version.into(),
                     detail: release.url.into(),
+                    ..Notice::default()
                 });
             }
         });
     });
+}
+
+/// An error notice, worded by the interface in its language from the kind
+/// of problem; the technical cause is shown as is.
+fn error_notice(problem: &Problem) -> Notice {
+    let failure = match problem.kind {
+        ProblemKind::SpotifyNotRunning => Failure::SpotifyNotRunning,
+        ProblemKind::SpotifyCliMissing => Failure::SpotifyCliMissing,
+        ProblemKind::SpotifyCommand => Failure::SpotifyCommand,
+        ProblemKind::NotALink => Failure::NotALink,
+        ProblemKind::ListNotStarted => Failure::ListNotStarted,
+        ProblemKind::LostSpotify => Failure::LostSpotify,
+        ProblemKind::CaptureNotStarted => Failure::CaptureNotStarted,
+        ProblemKind::UnknownTrack => Failure::UnknownTrack,
+        ProblemKind::CableRouting => Failure::CableRouting,
+        ProblemKind::HeadsetPlayback => Failure::HeadsetPlayback,
+        ProblemKind::Encoding => Failure::Encoding,
+        ProblemKind::DefaultDevice => Failure::DefaultDevice,
+        ProblemKind::Other => Failure::Other,
+    };
+    Notice {
+        kind: Warning::Error,
+        problem: failure,
+        device: problem.subject.as_str().into(),
+        detail: problem.detail.as_str().into(),
+    }
 }

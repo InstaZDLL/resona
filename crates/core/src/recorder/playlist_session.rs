@@ -14,6 +14,7 @@ use crossbeam_channel::{Receiver, Sender, select};
 use super::engine::{Recorder, RecorderConfig, RecorderEvent};
 use super::library::ExistingTracks;
 use super::playlist::{Mode, Plan, Step, entry_for};
+use crate::problem::Problem;
 use crate::spotify::cli::{NowPlaying, SpotifyCli};
 use crate::spotify::link::{LinkKind, SpotifyLink};
 use crate::spotify::title::TrackTitle;
@@ -76,7 +77,7 @@ pub enum PlaylistEvent {
         name: String,
         missed: Vec<Entry>,
     },
-    Error(String),
+    Error(Problem),
 }
 
 pub struct PlaylistSession {
@@ -131,12 +132,12 @@ fn run(
     let (name, missed) = match Run::new(config, source, events) {
         Ok(mut run) => {
             if let Err(e) = run.record(stop) {
-                let _ = events.send(PlaylistEvent::Error(e.to_string()));
+                let _ = events.send(PlaylistEvent::Error(Problem::from(&e)));
             }
             run.finish()
         }
         Err(e) => {
-            let _ = events.send(PlaylistEvent::Error(e.to_string()));
+            let _ = events.send(PlaylistEvent::Error(Problem::from(&e)));
             (String::new(), Vec::new())
         }
     };
@@ -233,7 +234,7 @@ impl<'a> Run<'a> {
                 },
                 recv(seen) -> playing => {
                     let Ok(playing) = playing else {
-                        return Err(Error::SpotifyCli("lost track of Spotify".into()));
+                        return Err(Error::LostSpotify);
                     };
                     let now = Instant::now();
                     match self.plan.observe(playing.as_ref(), now) {
@@ -247,7 +248,7 @@ impl<'a> Run<'a> {
                 }
                 recv(ticks) -> _ => {
                     if self.plan.current().is_none() && asked_at.elapsed() > START_TIMEOUT {
-                        return Err(Error::SpotifyCli("Spotify did not start the list".into()));
+                        return Err(Error::ListNotStarted);
                     }
                 }
             }
@@ -259,7 +260,7 @@ impl<'a> Run<'a> {
         loop {
             select! {
                 recv(stop) -> _ => return Ok(()),
-                recv(deadline) -> _ => return Err(Error::SpotifyCli("the capture did not start".into())),
+                recv(deadline) -> _ => return Err(Error::CaptureNotStarted),
                 recv(self.recorder_events) -> event => match event {
                     Ok(event) => {
                         let started = matches!(event, RecorderEvent::CaptureStarted { .. });
@@ -397,7 +398,7 @@ fn load(cli: &SpotifyCli, source: Source) -> Result<(String, Vec<Entry>, Mode)> 
             let info = cli
                 .lookup(std::slice::from_ref(&uri))?
                 .remove(&uri)
-                .ok_or_else(|| Error::SpotifyCli(format!("unknown track {uri}")))?;
+                .ok_or_else(|| Error::UnknownTrack(uri.clone()))?;
             let entry = Entry {
                 uri,
                 title: info.name.clone(),

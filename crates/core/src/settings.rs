@@ -57,8 +57,10 @@ impl From<Quality> for SpotifyQuality {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Language {
-    #[default]
     Fr,
+    /// The default: the interface is written in English, French is a
+    /// translation.
+    #[default]
     En,
 }
 
@@ -80,7 +82,7 @@ impl Default for Settings {
             virtual_cable: false,
             listen: false,
             check_updates: true,
-            language: Language::Fr,
+            language: Language::En,
         }
     }
 }

@@ -19,9 +19,14 @@ export struct TrackRow {
     format: string,
 }
 
+export enum Failure { other, spotify-not-running, spotify-cli-missing, spotify-command, not-a-link, list-not-started, lost-spotify, capture-not-started, unknown-track, cable-routing, headset-playback, encoding, default-device }
+
 export struct Notice {
     kind: Warning,
-    /// The output device, for the setup warnings.
+    /// For [`Warning.error`]: which situation.
+    problem: Failure,
+    /// The output device, for the setup warnings; for an error, what it
+    /// is about (a track title).
     device: string,
     detail: string,
 }
@@ -251,6 +256,24 @@ export component AppWindow inherits Window {
     callback restore-default-device(string);
     callback spotify-volume-max();
     callback open-url(string);
+
+    /// An error, worded in the interface's language. `subject`: what it is
+    /// about (a track title), when anything.
+    pure function problem-text(problem: Failure, subject: string) -> string {
+        return problem == Failure.spotify-not-running ? @tr("⚠ Spotify is not running: start it, then try again.")
+            : problem == Failure.spotify-cli-missing ? @tr("⚠ Spotify's command-line tool (spotify_cli) is missing: playlist mode, exact tags and the volume check need a recent Spotify build.")
+            : problem == Failure.spotify-command ? @tr("⚠ Spotify did not carry out the request.")
+            : problem == Failure.not-a-link ? @tr("⚠ This is not a Spotify playlist, album or track link.")
+            : problem == Failure.list-not-started ? @tr("⚠ Spotify did not start the playlist. Check that it is open and logged in, then try again.")
+            : problem == Failure.lost-spotify ? @tr("⚠ Spotify stopped answering: the playlist was stopped.")
+            : problem == Failure.capture-not-started ? @tr("⚠ The capture did not start: is Spotify running on this computer?")
+            : problem == Failure.unknown-track ? @tr("⚠ Spotify does not know this track.")
+            : problem == Failure.cable-routing ? @tr("⚠ Spotify could not be sent to the virtual cable: it stays on its device.")
+            : problem == Failure.headset-playback ? @tr("⚠ Spotify could not be played back on the headset.")
+            : problem == Failure.encoding ? @tr("⚠ \"{}\" could not be saved.", subject)
+            : problem == Failure.default-device ? @tr("⚠ The default output device could not be changed.")
+            : @tr("⚠ Something went wrong.");
+    }
     callback quality-changed(int);
     callback settings-changed();
     callback language-changed(int);
@@ -375,6 +398,7 @@ export component AppWindow inherits Window {
                         : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings.", notice.device, notice.detail)
                         : notice.kind == Warning.spotify-volume ? @tr("⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless.", notice.detail)
                         : notice.kind == Warning.update ? @tr("Resona {} is available.", notice.device)
+                        : notice.kind == Warning.error ? root.problem-text(notice.problem, notice.device) + (notice.detail == "" ? "" : " (" + notice.detail + ")")
                         : notice.detail;
                 }
                 if notice.kind == Warning.cable-default && notice.device != "": Text {

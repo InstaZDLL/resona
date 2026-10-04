@@ -181,7 +181,7 @@ Plan initial :
 
 Porter `frmEspionSpotify` : bouton d'enregistrement, console de logs, réglages (dossier, format, débit, qualité Spotify, profondeur FLAC, durée minimale, options sur les pubs, langue), réduction dans la zone de notification.
 
-- i18n : `@tr()` + gettext, `fr` et `en`. Remplace les `.resx`, `TranslationKeys` et `I18NKeys`.
+- i18n : `@tr()` + gettext, `fr` et `en`. Remplace les `.resx`, `TranslationKeys` et `I18NKeys`. **Anglais par défaut** (5 octobre 2026) : les textes sources sont en anglais, le français est une traduction (`translations/fr/LC_MESSAGES/resona.po`). Les erreurs passent par `problem::Problem` (une nature, plus la cause technique non traduite) : l'interface les formule dans sa langue (`problem-text`) ; seule la cause technique (Windows, Spotify) reste telle quelle, entre parenthèses.
 - Réglages : un fichier TOML dans `%APPDATA%\Resona`.
 
 ### Phase 5 bis — Mode playlist (4 octobre 2026)
