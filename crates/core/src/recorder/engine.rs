@@ -28,6 +28,7 @@ use crate::metadata::deezer::DeezerClient;
 use crate::metadata::name_match::title_similarity;
 use crate::metadata::{self, TagsOutcome};
 use crate::playback::Playback;
+use crate::problem::{Problem, ProblemKind};
 use crate::routing;
 use crate::spotify::cli::{NowPlaying, SpotifyCli};
 use crate::spotify::monitor::{Monitor, MonitorEvent};
@@ -122,7 +123,7 @@ pub enum RecorderEvent {
         duration: Duration,
     },
     Spotify(Event),
-    Error(String),
+    Error(Problem),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,7 +148,7 @@ impl Recorder {
             .name("resona-recorder".into())
             .spawn(move || {
                 if let Err(e) = run(&config, &events_tx, &stop_rx) {
-                    let _ = events_tx.send(RecorderEvent::Error(e.to_string()));
+                    let _ = events_tx.send(RecorderEvent::Error(Problem::from(&e)));
                 }
             })?;
         Ok((
@@ -248,8 +249,9 @@ impl CableRoute {
         // cleanly. The default device is the safe way back.
         let previous = current.filter(|id| *id != cable_id);
         if let Err(e) = routing::route_spotify(pid, Some(&cable_id)) {
-            let _ = events.send(RecorderEvent::Error(format!(
-                "cannot send Spotify to the virtual cable: {e}"
+            let _ = events.send(RecorderEvent::Error(Problem::new(
+                ProblemKind::CableRouting,
+                e,
             )));
             return None;
         }
@@ -279,8 +281,9 @@ fn listen(cable_id: &str, events: &Sender<RecorderEvent>) -> Option<(Playback, S
         // has said so already.
         Err(Error::PlaybackLoop) => None,
         Err(e) => {
-            let _ = events.send(RecorderEvent::Error(format!(
-                "cannot play Spotify on the headset: {e}"
+            let _ = events.send(RecorderEvent::Error(Problem::new(
+                ProblemKind::HeadsetPlayback,
+                e,
             )));
             None
         }
@@ -650,7 +653,11 @@ fn encode_jobs(
         }
         let event = match encode(config, &catalogues, library, order + 1, &job) {
             Ok(event) => event,
-            Err(e) => RecorderEvent::Error(format!("{}: {e}", job.ended.track.title)),
+            Err(e) => RecorderEvent::Error(Problem::about(
+                ProblemKind::Encoding,
+                &job.ended.track.title,
+                e,
+            )),
         };
         if matches!(event, RecorderEvent::Saved { .. }) {
             order += 1;

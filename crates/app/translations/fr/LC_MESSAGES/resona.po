@@ -265,3 +265,43 @@ msgstr "La télécharger"
 
 msgid "Check for updates at launch"
 msgstr "Rechercher les mises à jour au lancement"
+
+# Errors
+msgid "⚠ Spotify is not running: start it, then try again."
+msgstr "⚠ Spotify n'est pas lancé : lancez-le, puis réessayez."
+
+msgid "⚠ Spotify's command-line tool (spotify_cli) is missing: playlist mode, exact tags and the volume check need a recent Spotify build."
+msgstr "⚠ L'outil en ligne de commande de Spotify (spotify_cli) est absent : le mode playlist, les tags exacts et la vérification du volume demandent une version récente de Spotify."
+
+msgid "⚠ Spotify did not carry out the request."
+msgstr "⚠ Spotify n'a pas exécuté la demande."
+
+msgid "⚠ This is not a Spotify playlist, album or track link."
+msgstr "⚠ Ce n'est pas un lien de playlist, d'album ou de morceau Spotify."
+
+msgid "⚠ Spotify did not start the playlist. Check that it is open and logged in, then try again."
+msgstr "⚠ Spotify n'a pas lancé la playlist. Vérifiez qu'il est ouvert et connecté, puis réessayez."
+
+msgid "⚠ Spotify stopped answering: the playlist was stopped."
+msgstr "⚠ Spotify ne répond plus : la playlist a été arrêtée."
+
+msgid "⚠ The capture did not start: is Spotify running on this computer?"
+msgstr "⚠ La capture n'a pas démarré : Spotify tourne-t-il bien sur cet ordinateur ?"
+
+msgid "⚠ Spotify does not know this track."
+msgstr "⚠ Spotify ne connaît pas ce morceau."
+
+msgid "⚠ Spotify could not be sent to the virtual cable: it stays on its device."
+msgstr "⚠ Spotify n'a pas pu être envoyé vers le câble virtuel : il reste sur son périphérique."
+
+msgid "⚠ Spotify could not be played back on the headset."
+msgstr "⚠ Le son de Spotify n'a pas pu être rejoué dans le casque."
+
+msgid "⚠ \"{}\" could not be saved."
+msgstr "⚠ « {} » n'a pas pu être enregistré."
+
+msgid "⚠ The default output device could not be changed."
+msgstr "⚠ Le périphérique de sortie par défaut n'a pas pu être changé."
+
+msgid "⚠ Something went wrong."
+msgstr "⚠ Une erreur s'est produite."

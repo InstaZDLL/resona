@@ -39,7 +39,7 @@ a Slint interface.
 - File naming by artist / album folders, track or recording order numbers; tracks
   already recorded are skipped (or replaced, or kept twice).
 - Ads (Spotify Free) are never recorded and can be muted.
-- French and English interface; notification area icon; update check.
+- English (default) and French interface; notification area icon; update check.
 
 ## Requirements
 

@@ -16,6 +16,18 @@ pub enum Error {
     #[error("not a Spotify playlist, album or track link: {0}")]
     NotASpotifyLink(String),
 
+    #[error("Spotify did not start the list")]
+    ListNotStarted,
+
+    #[error("lost track of Spotify")]
+    LostSpotify,
+
+    #[error("the capture did not start")]
+    CaptureNotStarted,
+
+    #[error("unknown track {0}")]
+    UnknownTrack(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 

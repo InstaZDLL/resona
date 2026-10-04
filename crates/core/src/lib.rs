@@ -8,6 +8,7 @@ pub mod encode;
 pub mod error;
 pub mod format;
 pub mod metadata;
+pub mod problem;
 pub mod recorder;
 pub mod settings;
 pub mod spotify;
