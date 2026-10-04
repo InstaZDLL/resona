@@ -61,11 +61,20 @@ msgid "Start Spotify to record"
 msgstr "Lancez Spotify pour enregistrer"
 
 # Notices
-msgid "⚠ Windows audio enhancements may be on: recordings would not be lossless. Settings → Sound → your device → Audio enhancements → Off."
-msgstr "⚠ Les améliorations audio de Windows sont peut-être actives : les enregistrements ne seraient pas sans perte. Paramètres → Son → votre périphérique → Améliorations audio → Désactivé."
+msgid "⚠ Windows audio enhancements may be on for \"{}\": recordings would not be lossless. Settings → Sound → that device → Audio enhancements → Off."
+msgstr "⚠ Les améliorations audio de Windows sont peut-être actives sur « {} » : les enregistrements ne seraient pas sans perte. Paramètres → Son → ce périphérique → Améliorations audio → Désactivé."
 
-msgid "⚠ Your output device runs at {} Hz. Set it to 44100 Hz (Settings → Sound → your device → Format) for lossless recordings."
-msgstr "⚠ Votre périphérique de sortie fonctionne à {} Hz. Réglez-le sur 44100 Hz (Paramètres → Son → votre périphérique → Format) pour enregistrer sans perte."
+msgid "⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings."
+msgstr "⚠ « {} » fonctionne à {} Hz. Réglez-le sur 44100 Hz (Paramètres → Son → ce périphérique → Format) pour enregistrer sans perte."
+
+msgid "⚠ No virtual cable installed: Spotify stays on its device. Install VB-Cable or turn the option off in the settings."
+msgstr "⚠ Aucun câble virtuel installé : Spotify reste sur son périphérique. Installez VB-Cable ou désactivez l'option dans les réglages."
+
+msgid "⚠ The virtual cable is the Windows default output device: nothing can be heard."
+msgstr "⚠ Le câble virtuel est le périphérique de sortie par défaut de Windows : plus rien ne s'entend."
+
+msgid "Use \"{}\" again"
+msgstr "Revenir à « {} »"
 
 msgid "⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings."
 msgstr "⚠ « {} » a été modifié entre Spotify et l'enregistrement (effet, rééchantillonnage ou volume). Vérifiez les réglages audio."
@@ -126,8 +135,11 @@ msgstr "WAV, profondeur de la source"
 msgid "Shortest track kept (s)"
 msgstr "Durée minimale gardée (s)"
 
-msgid "Keep tracks recorded only in part (joined late, skipped)"
-msgstr "Garder les morceaux incomplets (pris en cours, passés)"
+msgid "Keep incomplete tracks"
+msgstr "Garder les morceaux incomplets"
+
+msgid "Started before the recording, or skipped before the end."
+msgstr "Pris en cours de route, ou passés avant la fin."
 
 msgid "Files"
 msgstr "Fichiers"
@@ -171,6 +183,24 @@ msgstr "Garder les deux"
 msgid "Make Spotify skip tracks already recorded"
 msgstr "Faire passer à Spotify les morceaux déjà enregistrés"
 
+msgid "Audio output"
+msgstr "Sortie audio"
+
+msgid "Play Spotify through a virtual cable"
+msgstr "Faire passer Spotify par un câble virtuel"
+
+msgid "Install VB-Cable (vb-audio.com/Cable) to use it. Your headset's settings (44100 Hz, enhancements, surround) then no longer affect the recordings."
+msgstr "Installez VB-Cable (vb-audio.com/Cable) pour l'utiliser. Les réglages de votre casque (44100 Hz, améliorations, son surround) n'affecteront alors plus les enregistrements."
+
+msgid "While recording, Spotify plays silently on \"{}\", set up by Spytify: your headset's settings no longer affect the recordings, and you can listen to something else."
+msgstr "Pendant l'enregistrement, Spotify joue en silence sur « {} », réglé par Spytify : les réglages de votre casque n'affectent plus les enregistrements, et vous pouvez écouter autre chose."
+
+msgid "Hear Spotify while recording"
+msgstr "Entendre Spotify pendant l'enregistrement"
+
+msgid "Get VB-Cable…"
+msgstr "Télécharger VB-Cable…"
+
 msgid "Ads (Spotify Free)"
 msgstr "Publicités (Spotify Gratuit)"
 
@@ -185,3 +215,6 @@ msgstr "Langue"
 
 msgid "For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect."
 msgstr "Pour enregistrer sans perte : Spotify en qualité Lossless, volume au maximum, normalisation, égaliseur, fondu enchaîné et Automix désactivés ; améliorations audio de Windows désactivées et périphérique de sortie à 44100 Hz. Chaque morceau enregistré indique s'il est sorti bit-perfect."
+
+msgid "⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off."
+msgstr "⚠ « {} » commence par un fondu ajouté par Spotify : le fondu enchaîné ou Automix est activé, et les changements de morceau ne sont pas sans perte. Spotify → Paramètres → Lecture → désactivez Fondu enchaîné et Automix."

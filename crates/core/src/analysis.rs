@@ -25,6 +25,9 @@ pub struct BitAnalysis {
     block: Block,
     loud: Share,
     quiet: Share,
+    /// Off-grid samples in the first [`HEAD_SAMPLES`], for
+    /// [`Self::fades_in`].
+    head_off: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,6 +89,10 @@ impl Fidelity {
     }
 }
 
+/// The first 2 s of a track (interleaved stereo at 44.1 kHz): where
+/// Spotify's crossfade and Automix ramp the volume up.
+const HEAD_SAMPLES: u64 = 2 * 44_100 * 2;
+
 /// At most one sample in this many off the 24-bit grid still counts as
 /// bit-perfect (610 in 17.8 million, measured on a 16-bit track).
 const TOUCHED_RATIO: u64 = 10_000;
@@ -113,6 +120,9 @@ impl BitAnalysis {
             // comparisons have no rounding slack to account for.
             let scaled_24 = sample * SCALE_24;
             if scaled_24 != scaled_24.round() {
+                if self.samples <= HEAD_SAMPLES {
+                    self.head_off += 1;
+                }
                 let exact = f64::from(sample) * f64::from(SCALE_24);
                 self.residual_24 += (exact - exact.round()).abs();
                 self.block.off += 1;
@@ -215,6 +225,20 @@ impl BitAnalysis {
         } else {
             Fidelity::Processed
         }
+    }
+
+    /// The track starts with a volume ramp Spotify added: its first 2 s
+    /// are almost all off the grid while the rest is mostly on it. That is
+    /// crossfade or Automix (measured 2026-10-03: 99.5 % then 0.5 to 2 %;
+    /// with normalization on top, 30 %). A fade in the source itself stays
+    /// on the grid.
+    pub fn fades_in(&self) -> bool {
+        if self.samples <= HEAD_SAMPLES * 2 {
+            return false;
+        }
+        let head = self.head_off as f64 / HEAD_SAMPLES as f64;
+        let body = (self.not_24_bit - self.head_off) as f64 / (self.samples - HEAD_SAMPLES) as f64;
+        head >= 0.5 && body <= head / 2.0
     }
 
     /// Smallest integer depth that holds the capture without loss, or
@@ -390,6 +414,33 @@ mod tests {
         let analysis = analyse(&[0.3]);
         assert!(!analysis.is_bit_transparent());
         assert_eq!(analysis.effective_depth(), None);
+    }
+
+    /// 10 s of a 16-bit signal; the first `ramp` samples scaled by a
+    /// growing gain, as Spotify's crossfade does.
+    fn with_ramp(ramp: usize) -> Vec<f32> {
+        (0..10 * 44_100 * 2)
+            .map(|i| {
+                let v = ((i * 7_919) % 20_000) as f32 / SCALE_16;
+                if i < ramp {
+                    v * (0.5 + 0.5 * i as f32 / ramp as f32) * 0.999
+                } else {
+                    v
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn crossfade_ramp_at_the_start_is_noticed() {
+        assert!(analyse(&with_ramp(2 * 44_100 * 2)).fades_in());
+        assert!(!analyse(&with_ramp(0)).fades_in());
+    }
+
+    #[test]
+    fn processing_all_along_is_not_a_fade() {
+        let processed: Vec<f32> = with_ramp(0).iter().map(|v| v * 0.9).collect();
+        assert!(!analyse(&processed).fades_in());
     }
 
     #[test]

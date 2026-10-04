@@ -7,7 +7,7 @@ Spytify enregistre ce que joue le client Spotify pour Windows, découpe le flux 
 | Sujet | Choix | Raison |
 | --- | --- | --- |
 | Interface | **Slint 1.18**, rendu logiciel, style Fluent | Mesuré dans `WaveFlow/prototypes/rust_slint_mini` : 10,5 Mo privés contre 78 Mo pour egui. L'appli tourne en fond toute la nuit. Widgets de formulaire prêts, i18n intégrée (`@tr`). |
-| Capture | **WASAPI process loopback** sur l'arbre `Spotify.exe` | Seul le son de Spotify est capturé. Plus besoin du pilote VB-Cable ni de la redirection par les interfaces COM non documentées (`Router/AudioRouter.cs`). |
+| Capture | **WASAPI process loopback** sur l'arbre `Spotify.exe` | Seul le son de Spotify est capturé, sans pilote. Mais la capture passe par la chaîne du périphérique où joue Spotify (fréquence, améliorations, surround) : d'où l'option **câble virtuel** (VB-Cable, non fourni), qui envoie Spotify sur le câble avec l'interface COM non documentée de `Router/AudioRouter.cs` (`core::routing`). |
 | Encodage | Capture dans un WAV float 32 bits temporaire, encodage à la fin du morceau | Le chemin de capture reste simple ; l'encodeur connaît l'analyse complète du morceau (profondeur FLAC). C'est aussi ce que fait la version C#. |
 | Plateforme | Windows uniquement | Spotify desktop + WASAPI. Le code Windows est derrière `#[cfg(windows)]`. |
 
@@ -157,7 +157,7 @@ Plan initial :
 
 ### Phase 5 — Interface Slint (en cours)
 
-Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours, bouton, liste des morceaux de la session avec leur qualité) et **panneau latéral de réglages**. Options reprises de la version C# : organisation des fichiers, morceaux déjà enregistrés, pubs. Abandonnées : périphérique audio et câble virtuel (capture par processus), identifiants API Spotify (Deezer), minuterie.
+Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours, bouton, liste des morceaux de la session avec leur qualité) et **panneau latéral de réglages**. Options reprises de la version C# : organisation des fichiers, morceaux déjà enregistrés, pubs, câble virtuel (rajouté le 2 octobre 2026 : il retire le casque de la chaîne enregistrée). Abandonnées : choix libre du périphérique audio, identifiants API Spotify (Deezer), minuterie.
 
 Fait côté interface (`crates/app`) :
 
@@ -166,6 +166,7 @@ Fait côté interface (`crates/app`) :
 - `app.rs` : un moniteur dédié à l'affichage (l'état de Spotify est visible même sans enregistrer), les événements du moteur transmis à la boucle Slint, l'arrêt (qui attend l'encodage du dernier morceau) hors du thread de l'interface, réglages enregistrés à chaque modification, choix du dossier avec `rfd`.
 - `mapping.rs` (pur, testé) : listes de l'interface ↔ réglages.
 - Vérifié le 1er octobre 2026 : fenêtre en français, morceau en cours et changements suivis.
+- Câble virtuel (2 octobre 2026) : `core::routing` lit et change le périphérique de sortie choisi pour Spotify (Paramètres → Mélangeur de volume), interfaces 21H2+ et antérieure ; `audio_setup::spotify_output_device` vérifie ce périphérique-là, et non plus le périphérique par défaut. Réglage « Faire passer Spotify par un câble virtuel » : pendant l'enregistrement seulement, Spotify est envoyé sur « CABLE Input » (rendu à son périphérique par `Drop`, même sur erreur ; une session interrompue est réparée à la suivante). Configuration automatique, sans droits administrateur, par `core::device_config` (`IPolicyConfig`, l'interface du panneau Son) : câble passé en 44,1 kHz (VB-Cable s'installe en 48 kHz, vérifié le 2 octobre 2026), et si l'installateur a fait du câble le périphérique par défaut, alerte avec un bouton pour revenir au vrai périphérique. Option « Entendre Spotify pendant l'enregistrement » (`core::playback`) : l'appli rejoue la capture sur le périphérique par défaut, à la place d'« Écouter ce périphérique » ; désactivée, Spotify enregistre en silence et on peut écouter autre chose. Le pilote n'est pas fourni (licence VB-Audio « all rights reserved »), un lien mène au site. Exemple `route_spotify [cable|default]`. **Mesuré le 3 octobre 2026** : par le câble, casque volontairement en améliorations actives, Oishii et Tell Me I'm Wrong (16 bits) sortent bit-perfect 16 bits, coupures nettes ; yes, and? reste « crêtes limitées » (fichier Spotify). Fausse piste du même jour : une mise à jour de Spotify avait réactivé fondu enchaîné, Automix et normalisation. Symptômes : coupures décalées de 0 à 1,25 s, début et fin de morceau hors grille, tout « incomplet ». D'où `BitAnalysis::fades_in` (2 premières secondes hors grille, le reste beaucoup moins) et l'alerte `SpotifyFades`. Exemples ajoutés : `align_flac` (décalage entre deux enregistrements d'un morceau), `record --cable|--no-cable`.
 
 Reste : pochette du morceau en cours (vignette SMTC), icône dans la zone de notification, test complet du panneau de réglages.
 
@@ -242,7 +243,7 @@ Décision proposée : ne pas la porter dans la première version. Si des erreurs
 | C# (`spy-spotify`) | Rust (`spytify`) |
 | --- | --- |
 | `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs`, `SpotifyHandler.cs` | `core::spotify` (phase 1) |
-| `AudioSessions/*`, `Router/*`, `Drivers/*` | `core::capture` (process loopback, sans pilote) |
+| `AudioSessions/*`, `Router/*`, `Drivers/*` | `core::capture` (process loopback), `core::routing` (câble virtuel, pilote non fourni) |
 | `Watcher.cs`, `Recorder.cs` | `core::recorder` (phase 2) |
 | `Native/FileManager.cs` | `core::files` (phase 2) |
 | `Recorder.GetMediaFileWriter` (NAudio.Lame) | `core::encode` |

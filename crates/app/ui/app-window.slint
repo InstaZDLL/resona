@@ -5,7 +5,7 @@ export enum TrackState { recording, saved, discarded, already-recorded, failed }
 /// Quality of a saved or discarded track, from the fidelity analysis.
 export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
 export enum Reason { none, partial, too-short, already-recorded }
-export enum Warning { enhancements, sample-rate, processed, error }
+export enum Warning { enhancements, sample-rate, processed, spotify-fades, cable-missing, cable-default, error }
 
 export struct TrackRow {
     title: string,
@@ -21,6 +21,8 @@ export struct TrackRow {
 
 export struct Notice {
     kind: Warning,
+    /// The output device, for the setup warnings.
+    device: string,
     detail: string,
 }
 
@@ -120,6 +122,66 @@ component SettingRow inherits HorizontalLayout {
     @children
 }
 
+/// A check box whose label wraps, with an optional explanation below.
+component Option inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> hint;
+    in property <bool> enabled: true;
+    in-out property <bool> checked;
+    callback toggled();
+    spacing: 4px;
+    alignment: start;
+    CheckBox {
+        enabled: root.enabled;
+        checked <=> root.checked;
+        toggled => { root.toggled(); }
+    }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 2px;
+        padding-top: 6px;
+        Text {
+            text: root.text;
+            wrap: word-wrap;
+            color: root.enabled ? #1d1d1f : #8e8e93;
+            TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    root.checked = !root.checked;
+                    root.toggled();
+                }
+            }
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            wrap: word-wrap;
+            font-size: 11px;
+            color: #8e8e93;
+        }
+    }
+}
+
+/// A light round button with a drawn cross: the "✕" glyph is missing from
+/// the default font and showed as an empty square.
+component CloseButton inherits Rectangle {
+    callback clicked();
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background: touch.has-hover ? #0000001a : transparent;
+    Path {
+        width: 12px;
+        height: 12px;
+        commands: "M 0 0 L 12 12 M 12 0 L 0 12";
+        stroke: #1d1d1f;
+        stroke-width: 1.6px;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 component Section inherits VerticalLayout {
     in property <string> title;
     spacing: 8px;
@@ -158,11 +220,18 @@ export component AppWindow inherits Window {
     in-out property <int> existing-index;
     in-out property <bool> skip-in-spotify;
     in-out property <bool> mute-ads: true;
+    in-out property <bool> virtual-cable;
+    in-out property <bool> listen;
     in-out property <int> language-index;
+    /// The installed virtual cable, empty if none.
+    in property <string> cable-name;
 
     callback toggle-recording();
     callback browse-output();
     callback open-output();
+    callback open-cable-site();
+    /// Makes the device `id` the Windows default again.
+    callback restore-default-device(string);
     callback quality-changed(int);
     callback settings-changed();
     callback language-changed(int);
@@ -259,16 +328,31 @@ export component AppWindow inherits Window {
         for notice in root.notices: Rectangle {
             background: notice.kind == Warning.error ? #ffe5e5 : #fff4e5;
             border-radius: 8px;
-            height: notice-text.preferred-height + 16px;
-            notice-text := Text {
-                x: 12px;
-                width: parent.width - 24px;
-                wrap: word-wrap;
-                color: notice.kind == Warning.error ? #a40000 : #8a4b00;
-                text: notice.kind == Warning.enhancements ? @tr("⚠ Windows audio enhancements may be on: recordings would not be lossless. Settings → Sound → your device → Audio enhancements → Off.")
-                    : notice.kind == Warning.sample-rate ? @tr("⚠ Your output device runs at {} Hz. Set it to 44100 Hz (Settings → Sound → your device → Format) for lossless recordings.", notice.detail)
-                    : notice.kind == Warning.processed ? @tr("⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings.", notice.detail)
-                    : notice.detail;
+            VerticalLayout {
+                padding: 8px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 6px;
+                Text {
+                    wrap: word-wrap;
+                    color: notice.kind == Warning.error ? #a40000 : #8a4b00;
+                    text: notice.kind == Warning.enhancements ? @tr("⚠ Windows audio enhancements may be on for \"{}\": recordings would not be lossless. Settings → Sound → that device → Audio enhancements → Off.", notice.device)
+                        : notice.kind == Warning.sample-rate ? @tr("⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings.", notice.device, notice.detail)
+                        : notice.kind == Warning.cable-missing ? @tr("⚠ No virtual cable installed: Spotify stays on its device. Install VB-Cable or turn the option off in the settings.")
+                        : notice.kind == Warning.spotify-fades ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                        : notice.kind == Warning.cable-default ? @tr("⚠ The virtual cable is the Windows default output device: nothing can be heard.")
+                        : notice.kind == Warning.processed ? @tr("⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings.", notice.detail)
+                        : notice.detail;
+                }
+                if notice.kind == Warning.cable-default && notice.device != "": Text {
+                    text: @tr("Use \"{}\" again", notice.device);
+                    color: #0a84ff;
+                    font-weight: 700;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.restore-default-device(notice.detail); }
+                    }
+                }
             }
         }
 
@@ -364,15 +448,16 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     vertical-alignment: center;
                 }
-                Button {
-                    text: "✕";
+                CloseButton {
                     clicked => { root.settings-open = false; }
                 }
             }
-            ScrollView {
+            scroll := ScrollView {
                 VerticalLayout {
+                    // As wide as the panel: no sideways scrolling.
+                    width: scroll.visible-width;
                     spacing: 18px;
-                    padding-right: 8px;
+                    padding-right: 12px;
 
                     Section {
                         title: @tr("Recording");
@@ -420,8 +505,9 @@ export component AppWindow inherits Window {
                                 edited => { root.settings-changed(); }
                             }
                         }
-                        CheckBox {
-                            text: @tr("Keep tracks recorded only in part (joined late, skipped)");
+                        Option {
+                            text: @tr("Keep incomplete tracks");
+                            hint: @tr("Started before the recording, or skipped before the end.");
                             checked <=> root.keep-partial;
                             toggled => { root.settings-changed(); }
                         }
@@ -456,7 +542,7 @@ export component AppWindow inherits Window {
                                 selected => { root.settings-changed(); }
                             }
                         }
-                        CheckBox {
+                        Option {
                             text: @tr("Make Spotify skip tracks already recorded");
                             enabled: root.existing-index == 0;
                             checked <=> root.skip-in-spotify;
@@ -465,8 +551,35 @@ export component AppWindow inherits Window {
                     }
 
                     Section {
+                        title: @tr("Audio output");
+                        Option {
+                            text: @tr("Play Spotify through a virtual cable");
+                            hint: root.cable-name == ""
+                                ? @tr("Install VB-Cable (vb-audio.com/Cable) to use it. Your headset's settings (44100 Hz, enhancements, surround) then no longer affect the recordings.")
+                                : @tr("While recording, Spotify plays silently on \"{}\", set up by Spytify: your headset's settings no longer affect the recordings, and you can listen to something else.", root.cable-name);
+                            enabled: root.cable-name != "" || root.virtual-cable;
+                            checked <=> root.virtual-cable;
+                            toggled => { root.settings-changed(); }
+                        }
+                        Option {
+                            text: @tr("Hear Spotify while recording");
+                            enabled: root.virtual-cable;
+                            checked <=> root.listen;
+                            toggled => { root.settings-changed(); }
+                        }
+                        if root.cable-name == "": Text {
+                            text: @tr("Get VB-Cable…");
+                            color: #0a84ff;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-cable-site(); }
+                            }
+                        }
+                    }
+
+                    Section {
                         title: @tr("Ads (Spotify Free)");
-                        CheckBox {
+                        Option {
                             text: @tr("Mute Spotify during ads");
                             checked <=> root.mute-ads;
                             toggled => { root.settings-changed(); }
