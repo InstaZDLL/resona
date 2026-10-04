@@ -1,4 +1,4 @@
-//! Is there a newer Spytify? Asks GitHub for the latest release of the
+//! Is there a newer Resona? Asks GitHub for the latest release of the
 //! repository (replaces the C# version's `EspionSpotify.Updater`, which
 //! unzipped the release over the install; here the installer does that).
 
@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-const LATEST_RELEASE: &str = "https://api.github.com/repos/InstaZDLL/spytify/releases/latest";
+const LATEST_RELEASE: &str = "https://api.github.com/repos/InstaZDLL/resona/releases/latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +32,7 @@ struct LatestRelease {
 pub fn newer_release(current: &str) -> Result<Option<Release>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
-        .user_agent(concat!("Spytify/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Resona/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
     let response = client
@@ -87,7 +87,7 @@ mod tests {
     fn latest(tag: &str) -> LatestRelease {
         LatestRelease {
             tag_name: tag.into(),
-            html_url: format!("https://github.com/InstaZDLL/spytify/releases/tag/{tag}"),
+            html_url: format!("https://github.com/InstaZDLL/resona/releases/tag/{tag}"),
             draft: false,
             prerelease: false,
         }

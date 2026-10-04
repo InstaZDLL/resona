@@ -107,6 +107,12 @@ pub fn run() -> anyhow::Result<()> {
         let session = session.clone();
         move || {
             if let Some(window) = weak.upgrade() {
+                // The last track is being encoded: the window's button is
+                // disabled, but the notification area menu still calls
+                // this.
+                if window.get_finishing() {
+                    return;
+                }
                 if window.get_recording() {
                     session.stop(&window);
                 } else {

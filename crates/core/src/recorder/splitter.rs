@@ -1,4 +1,4 @@
-//! Turning the continuous ca.map(|p| p.frame.saturating_sub(self.snap_window(p).before))ture into one recording per track.
+//! Turning the continuous capture into one recording per track.
 //!
 //! The monitor reports changes late: after the next poll, and after
 //! Spotify updated its title. So audio is held back for [`HORIZON`] before

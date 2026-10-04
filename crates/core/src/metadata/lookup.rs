@@ -71,7 +71,11 @@ fn score(query: &Query, hit: &TrackHit) -> Option<f64> {
 /// `(Remix)` or `(Live)`, a feature does not make another version.
 fn without_featuring(title: &str) -> String {
     const MARKERS: [&str; 4] = ["feat.", "ft.", "featuring ", "with "];
-    let lower = title.to_lowercase();
+    // ASCII lowercasing keeps every byte offset of `title`: full Unicode
+    // lowercasing can change a character's length (`İ` takes 2 bytes,
+    // its lowercase 3), and slicing `title` at those offsets would panic
+    // or cut elsewhere. The markers are ASCII anyway.
+    let lower = title.to_ascii_lowercase();
     for (open, close) in [("(", ')'), ("[", ']')] {
         for marker in MARKERS {
             let needle = format!("{open}{marker}");
@@ -226,6 +230,14 @@ mod tests {
         assert_eq!(without_featuring("Song [ft. X] (Live)"), "Song  (Live)");
         assert_eq!(without_featuring("Song - feat. X"), "Song");
         assert_eq!(without_featuring("Without You"), "Without You");
+    }
+
+    #[test]
+    fn featuring_is_cut_after_letters_that_lowercase_longer() {
+        // `İ` lowercases to 3 bytes: Unicode lowercasing shifted the
+        // offsets and cut inside a character.
+        assert_eq!(without_featuring("İİİ Song (feat. X)"), "İİİ Song");
+        assert_eq!(without_featuring("ĪSTANBUL - ft. Y"), "ĪSTANBUL");
     }
 
     #[test]

@@ -4,6 +4,8 @@
 //! over. A [`Plan`] decides; this module talks to Spotify and the recorder.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -219,7 +221,8 @@ impl<'a> Run<'a> {
             self.plan.requested(0, Instant::now());
         }
         let asked_at = Instant::now();
-        let seen = watch()?;
+        // Held until the run ends, however it ends: stops the watch.
+        let (seen, _watch) = watch()?;
         let ticks = crossbeam_channel::tick(POLL);
         loop {
             select! {
@@ -348,14 +351,18 @@ impl<'a> Run<'a> {
 /// Asks Spotify what it plays every [`POLL`], on a thread of its own: a
 /// call can hang for seconds (seen 2026-10-04), and the session must keep
 /// handling the recorder meanwhile. Only answers are sent: a failed call
-/// is not "nothing playing", which would end the list.
-fn watch() -> Result<Receiver<Option<NowPlaying>>> {
+/// is not "nothing playing", which would end the list. The thread stops
+/// when the returned [`Watch`] is dropped, even while every call fails
+/// (Spotify closed).
+fn watch() -> Result<(Receiver<Option<NowPlaying>>, Watch)> {
     let cli = SpotifyCli::find()?;
     let (seen_tx, seen_rx) = crossbeam_channel::bounded(1);
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
     thread::Builder::new()
         .name("resona-now-playing".into())
         .spawn(move || {
-            loop {
+            while !thread_stop.load(Ordering::Relaxed) {
                 match cli.now_playing() {
                     Ok(playing) => {
                         if seen_tx.send(playing).is_err() {
@@ -367,7 +374,18 @@ fn watch() -> Result<Receiver<Option<NowPlaying>>> {
                 thread::sleep(POLL);
             }
         })?;
-    Ok(seen_rx)
+    Ok((seen_rx, Watch { stop }))
+}
+
+/// Stops the [`watch`] thread when dropped.
+struct Watch {
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 /// The entries to record and how to play them.
