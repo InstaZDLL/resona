@@ -1,7 +1,7 @@
 //! The recording session: capture + monitor in, one FLAC per track out.
 //!
 //! Three threads besides the caller's: the capture thread (WASAPI), the
-//! monitor thread (Spotiframe_at(started_at)y state), and this engine's own, which owns the
+//! monitor thread (Spotify state), and this engine's own, which owns the
 //! [`Splitter`] and the temporary WAV of the track being recorded. Encoding
 //! runs on a fourth thread so a slow FLAC never holds up the capture.
 
@@ -705,13 +705,18 @@ fn encode(
         }
         OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps)?,
     }
-    let (tags, outcome) = metadata::tags_for(
+    let (tags, mut outcome) = metadata::tags_for(
         catalogues.deezer.as_ref(),
         catalogues.spotify.as_ref(),
         &job.ended.track,
         job.uri.as_deref(),
     );
-    let tagged = tags.write(&staged, format);
+    // Best effort: the audio is the recording, and once moved into the
+    // folder it must not be reported as failed for want of tags.
+    if let Err(e) = tags.write(&staged, format) {
+        tracing::warn!("{title}: tags not written: {e}");
+        outcome.write_error = Some(e.to_string());
+    }
 
     // Filed with the tags just found: the album artist and album name
     // from Deezer group an album better than Spotify's artist list.
@@ -756,7 +761,6 @@ fn encode(
     std::fs::rename(&staged, &path)?;
     library.add(path.clone());
     drop(library);
-    tagged?;
     Ok(RecorderEvent::Saved {
         title,
         path,

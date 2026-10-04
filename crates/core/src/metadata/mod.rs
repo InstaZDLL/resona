@@ -22,12 +22,15 @@ pub struct TagsOutcome {
     /// Spotify's catalogue knew the release played.
     pub spotify: bool,
     pub deezer: DeezerOutcome,
+    /// `None` once written into the file; the error otherwise (the audio
+    /// is kept either way).
+    pub write_error: Option<String>,
 }
 
 impl TagsOutcome {
-    /// More than the window title and SMTC went into the tags.
+    /// More than the window title and SMTC went into the file's tags.
     pub fn is_complete(&self) -> bool {
-        self.spotify || self.deezer == DeezerOutcome::Matched
+        self.write_error.is_none() && (self.spotify || self.deezer == DeezerOutcome::Matched)
     }
 }
 
@@ -79,6 +82,7 @@ pub fn tags_for(
         TagsOutcome {
             spotify: details.is_some(),
             deezer: deezer_outcome,
+            write_error: None,
         },
     )
 }
@@ -120,4 +124,27 @@ fn from_deezer(client: &DeezerClient, track: &Track, tags: &mut TrackTags) -> De
         Ok(DeezerOutcome::Matched)
     })()
     .unwrap_or_else(|e| DeezerOutcome::Unavailable(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tags_not_written_are_not_complete() {
+        let mut outcome = TagsOutcome {
+            spotify: true,
+            deezer: DeezerOutcome::NoMatch,
+            write_error: None,
+        };
+        assert!(outcome.is_complete());
+        outcome.write_error = Some("file locked".into());
+        assert!(!outcome.is_complete());
+        outcome = TagsOutcome {
+            spotify: false,
+            deezer: DeezerOutcome::NoMatch,
+            write_error: None,
+        };
+        assert!(!outcome.is_complete());
+    }
 }

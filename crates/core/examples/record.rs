@@ -195,9 +195,13 @@ fn describe_tags(outcome: &resona_core::metadata::TagsOutcome) -> String {
         DeezerOutcome::NoMatch => "no Deezer match".to_owned(),
         DeezerOutcome::Unavailable(why) => format!("Deezer unavailable ({why})"),
     };
-    if outcome.spotify {
+    let found = if outcome.spotify {
         format!("Spotify catalogue + {deezer}")
     } else {
         deezer
+    };
+    match &outcome.write_error {
+        Some(e) => format!("{found}, NOT WRITTEN ({e})"),
+        None => found,
     }
 }
