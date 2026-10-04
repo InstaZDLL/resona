@@ -200,6 +200,8 @@ export component AppWindow inherits Window {
     in property <string> now-title;
     in property <string> now-artist;
     in property <string> now-album;
+    in property <image> now-cover;
+    in property <bool> has-cover;
 
     // Session
     in property <bool> recording;
@@ -276,7 +278,15 @@ export component AppWindow inherits Window {
                     height: 64px;
                     border-radius: 6px;
                     background: root.spotify-state == SpotifyState.playing ? #1db95426 : #0000000d;
-                    Text {
+                    clip: true;
+                    property <bool> cover-shown: root.has-cover && (root.spotify-state == SpotifyState.playing || root.spotify-state == SpotifyState.paused);
+                    if cover-shown: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.now-cover;
+                        image-fit: cover;
+                    }
+                    if !cover-shown: Text {
                         text: root.spotify-state == SpotifyState.ad ? "AD" : "♪";
                         font-size: 26px;
                         color: #6e6e73;

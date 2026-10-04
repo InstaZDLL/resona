@@ -9,6 +9,8 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 };
 
+use windows::Storage::Streams::DataReader;
+
 use crate::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,32 @@ impl Smtc {
             }
         }
         Ok(false)
+    }
+
+    /// The cover art Spotify gives Windows for the current track (JPEG or
+    /// PNG bytes, 300 px for Spotify), if any.
+    pub fn spotify_thumbnail(&self) -> Result<Option<Vec<u8>>> {
+        for session in self.manager.GetSessions()? {
+            let app_id = session.SourceAppUserModelId()?.to_string();
+            if !app_id.to_ascii_lowercase().contains("spotify") {
+                continue;
+            }
+            let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+            let Ok(reference) = properties.Thumbnail() else {
+                return Ok(None);
+            };
+            let stream = reference.OpenReadAsync()?.join()?;
+            let size = u32::try_from(stream.Size()?).unwrap_or(0);
+            if size == 0 {
+                return Ok(None);
+            }
+            let reader = DataReader::CreateDataReader(&stream)?;
+            reader.LoadAsync(size)?.join()?;
+            let mut bytes = vec![0; size as usize];
+            reader.ReadBytes(&mut bytes)?;
+            return Ok(Some(bytes));
+        }
+        Ok(None)
     }
 
     /// Spotify's session, if Spotify registered one.
