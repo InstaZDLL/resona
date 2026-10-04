@@ -1,4 +1,4 @@
-//! Spytify's engine: find Spotify, capture only its audio, split it into
+//! Resona's engine: find Spotify, capture only its audio, split it into
 //! tracks, encode and tag them. No UI code lives here.
 //!
 //! The roadmap and the reasoning behind each module are in `docs/PLAN.md`.
@@ -11,6 +11,7 @@ pub mod metadata;
 pub mod recorder;
 pub mod settings;
 pub mod spotify;
+pub mod update;
 
 #[cfg(windows)]
 pub mod audio_setup;

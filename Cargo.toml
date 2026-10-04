@@ -6,7 +6,7 @@ members = ["crates/core", "crates/app"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-repository = "https://github.com/InstaZDLL/spytify"
+repository = "https://github.com/InstaZDLL/resona"
 
 [profile.release]
 lto = "thin"
@@ -19,5 +19,5 @@ strip = true
 [profile.dev.package."*"]
 opt-level = 3
 
-[profile.dev.package.spytify-core]
+[profile.dev.package.resona-core]
 opt-level = 3

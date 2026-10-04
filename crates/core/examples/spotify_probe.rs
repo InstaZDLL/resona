@@ -3,15 +3,15 @@
 //! Use it to check how Spotify behaves on ads, pauses and track changes.
 //!
 //! ```text
-//! cargo run -p spytify-core --example spotify_probe -- [seconds]
+//! cargo run -p resona-core --example spotify_probe -- [seconds]
 //! ```
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use std::time::{Duration, Instant};
 
-    use spytify_core::spotify::monitor::{POLL_INTERVAL, Poller, status_of};
-    use spytify_core::spotify::state::Content;
+    use resona_core::spotify::monitor::{POLL_INTERVAL, Poller, status_of};
+    use resona_core::spotify::state::Content;
 
     tracing_subscriber::fmt::init();
     let seconds: u64 = std::env::args()

@@ -1,8 +1,8 @@
 //! A real recording session from the command line, with the app's saved
-//! settings (`%APPDATA%\Spytify\settings.toml`), overridden by the flags.
+//! settings (`%APPDATA%\Resona\settings.toml`), overridden by the flags.
 //!
 //! ```text
-//! cargo run -p spytify-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable]
+//! cargo run -p resona-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable]
 //!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
@@ -11,8 +11,8 @@ fn main() -> anyhow::Result<()> {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use spytify_core::recorder::engine::Recorder;
-    use spytify_core::settings::Settings;
+    use resona_core::recorder::engine::Recorder;
+    use resona_core::settings::Settings;
 
     // lofty warns on every FLAC it tags that it adds a padding block: our
     // encoder writes none, which is fine.
@@ -80,13 +80,13 @@ fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(windows)]
-fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
+fn print_event(event: resona_core::recorder::engine::RecorderEvent) {
     use std::time::Duration;
 
-    use spytify_core::analysis::Fidelity;
-    use spytify_core::audio_setup::SetupIssue;
-    use spytify_core::recorder::engine::RecorderEvent;
-    use spytify_core::spotify::state::Event;
+    use resona_core::analysis::Fidelity;
+    use resona_core::audio_setup::SetupIssue;
+    use resona_core::recorder::engine::RecorderEvent;
+    use resona_core::spotify::state::Event;
 
     let quality = |fidelity: Fidelity| match fidelity {
         Fidelity::BitPerfect { depth, touched: 0 } => format!("bit-perfect {depth}-bit"),
@@ -188,8 +188,8 @@ fn main() {
 }
 
 #[cfg(windows)]
-fn describe_tags(outcome: &spytify_core::metadata::TagsOutcome) -> String {
-    use spytify_core::metadata::DeezerOutcome;
+fn describe_tags(outcome: &resona_core::metadata::TagsOutcome) -> String {
+    use resona_core::metadata::DeezerOutcome;
     let deezer = match &outcome.deezer {
         DeezerOutcome::Matched => "Deezer".to_owned(),
         DeezerOutcome::NoMatch => "no Deezer match".to_owned(),

@@ -3,7 +3,7 @@
 //! at a pause, a cut).
 //!
 //! ```text
-//! cargo run -p spytify-core --example analyze_flac -- "Artist - Title.flac"
+//! cargo run -p resona-core --example analyze_flac -- "Artist - Title.flac"
 //! ```
 
 fn main() -> anyhow::Result<()> {

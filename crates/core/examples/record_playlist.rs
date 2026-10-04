@@ -3,17 +3,17 @@
 //! settings file.
 //!
 //! ```text
-//! cargo run -p spytify-core --example record_playlist -- <link> [output dir] [--cable|--no-cable]
+//! cargo run -p resona-core --example record_playlist -- <link> [output dir] [--cable|--no-cable]
 //! ```
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use std::path::PathBuf;
 
-    use spytify_core::recorder::engine::RecorderEvent;
-    use spytify_core::recorder::playlist_session::{PlaylistEvent, PlaylistSession, Source};
-    use spytify_core::settings::Settings;
-    use spytify_core::spotify::link::SpotifyLink;
+    use resona_core::recorder::engine::RecorderEvent;
+    use resona_core::recorder::playlist_session::{PlaylistEvent, PlaylistSession, Source};
+    use resona_core::settings::Settings;
+    use resona_core::spotify::link::SpotifyLink;
 
     use tracing_subscriber::prelude::*;
     tracing_subscriber::registry()

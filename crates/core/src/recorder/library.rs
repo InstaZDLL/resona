@@ -7,7 +7,9 @@ use super::naming::{title_key, track_key};
 use crate::spotify::title::TrackTitle;
 
 const AUDIO_EXTENSIONS: [&str; 3] = ["flac", "wav", "mp3"];
-const TEMP_DIR: &str = ".spytify-tmp";
+const TEMP_DIR: &str = ".resona-tmp";
+/// The same, from before the app was renamed (Spytify).
+const OLD_TEMP_DIR: &str = ".spytify-tmp";
 
 /// What to do with a track that is already in the output folder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -42,7 +44,10 @@ impl Library {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    if path.file_name().is_some_and(|n| n != TEMP_DIR) {
+                    if path
+                        .file_name()
+                        .is_some_and(|n| n != TEMP_DIR && n != OLD_TEMP_DIR)
+                    {
                         pending.push(path);
                     }
                 } else {
@@ -89,7 +94,7 @@ mod tests {
 
     #[test]
     fn finds_tracks_in_sub_folders_whatever_the_format() {
-        let dir = std::env::temp_dir().join(format!("spytify-library-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-library-{}", std::process::id()));
         let album = dir.join("Beach Riot").join("Sub Atomic Party Cool");
         std::fs::create_dir_all(&album).unwrap();
         std::fs::create_dir_all(dir.join(TEMP_DIR)).unwrap();

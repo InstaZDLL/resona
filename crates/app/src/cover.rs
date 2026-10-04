@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use resona_core::spotify::smtc::Smtc;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
-use spytify_core::spotify::smtc::Smtc;
 
 use crate::AppWindow;
 
@@ -22,7 +22,7 @@ impl CoverLoader {
     pub fn spawn(window: Weak<AppWindow>) -> Self {
         let (requests, received) = crossbeam_channel::unbounded();
         thread::Builder::new()
-            .name("spytify-cover".into())
+            .name("resona-cover".into())
             .spawn(move || {
                 let _ = wasapi::initialize_mta();
                 match Smtc::new() {

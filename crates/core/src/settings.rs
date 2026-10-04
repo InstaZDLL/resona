@@ -1,4 +1,4 @@
-//! User settings, kept in `%APPDATA%\Spytify\settings.toml`.
+//! User settings, kept in `%APPDATA%\Resona\settings.toml`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,7 +13,7 @@ use crate::recorder::naming::Layout;
 #[serde(default)]
 pub struct Settings {
     pub output_dir: PathBuf,
-    /// The quality chosen in Spotify's own settings: Spytify cannot read
+    /// The quality chosen in Spotify's own settings: Resona cannot read
     /// it, and it decides the natural output format.
     pub spotify_quality: Quality,
     /// `flac`, `flac16`, `flac24`, `wav`, `wav16`, `wav24`, `mp3:<kbps>`.
@@ -30,6 +30,8 @@ pub struct Settings {
     pub virtual_cable: bool,
     /// Hear Spotify while it plays into the cable.
     pub listen: bool,
+    /// Ask GitHub for a newer release at launch.
+    pub check_updates: bool,
     pub language: Language,
 }
 
@@ -66,7 +68,7 @@ impl Default for Settings {
             .map(|home| PathBuf::from(home).join("Music"))
             .unwrap_or_else(|| PathBuf::from("."));
         Self {
-            output_dir: music.join("Spytify"),
+            output_dir: music.join("Resona"),
             spotify_quality: Quality::Lossless,
             format: SpotifyQuality::Lossless.default_output(),
             min_duration_secs: 30,
@@ -77,14 +79,22 @@ impl Default for Settings {
             mute_ads: true,
             virtual_cable: false,
             listen: false,
+            check_updates: true,
             language: Language::Fr,
         }
     }
 }
 
 impl Settings {
-    /// `%APPDATA%\Spytify\settings.toml`.
+    /// `%APPDATA%\Resona\settings.toml`.
     pub fn path() -> Option<PathBuf> {
+        std::env::var_os("APPDATA")
+            .map(|dir| PathBuf::from(dir).join("Resona").join("settings.toml"))
+    }
+
+    /// Where the settings were kept before the app was renamed from
+    /// Spytify (2026-10-05): read once, then saved under the new name.
+    fn old_path() -> Option<PathBuf> {
         std::env::var_os("APPDATA")
             .map(|dir| PathBuf::from(dir).join("Spytify").join("settings.toml"))
     }
@@ -92,7 +102,15 @@ impl Settings {
     /// The saved settings, or the defaults when there are none. A damaged
     /// file is set aside (`settings.toml.bad`) rather than lost or fatal.
     pub fn load() -> Self {
-        Self::path().map_or_else(Self::default, |path| Self::load_from(&path))
+        let Some(path) = Self::path() else {
+            return Self::default();
+        };
+        if !path.exists()
+            && let Some(old) = Self::old_path().filter(|p| p.exists())
+        {
+            return Self::load_from(&old);
+        }
+        Self::load_from(&path)
     }
 
     pub fn load_from(path: &Path) -> Self {
@@ -172,7 +190,7 @@ mod tests {
     use crate::recorder::naming::{Folders, Prefix};
 
     fn temp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("spytify-settings-{}-{name}", std::process::id()))
+        std::env::temp_dir().join(format!("resona-settings-{}-{name}", std::process::id()))
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Deezer public API client: no key, no account. Derived from WaveFlow's
-//! (`waveflow-core/src/metadata/deezer.rs`), made blocking (Spytify runs on
+//! (`waveflow-core/src/metadata/deezer.rs`), made blocking (Resona runs on
 //! plain threads) and reduced to what tagging a track needs.
 //!
-//! Rate limit: about 50 requests per 5 seconds per IP. Spytify makes three
+//! Rate limit: about 50 requests per 5 seconds per IP. Resona makes three
 //! or four per recorded track, minutes apart.
 
 use std::time::Duration;
@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 const BASE_URL: &str = "https://api.deezer.com";
-const USER_AGENT: &str = concat!("Spytify/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("Resona/", env!("CARGO_PKG_VERSION"));
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Deezer's in-band error object: refusals arrive with **HTTP 200** and

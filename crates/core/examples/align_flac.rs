@@ -2,7 +2,7 @@
 //! track: how much audio a cut lost or gained at the start.
 //!
 //! ```text
-//! cargo run -p spytify-core --example align_flac -- <reference.flac> <other.flac> [seconds]
+//! cargo run -p resona-core --example align_flac -- <reference.flac> <other.flac> [seconds]
 //! ```
 //!
 //! Positive: `other` starts that much later in the track than `reference`

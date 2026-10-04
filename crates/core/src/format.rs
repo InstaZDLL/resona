@@ -9,7 +9,7 @@
 pub const CAPTURE_SAMPLE_RATE: u32 = 44_100;
 pub const CAPTURE_CHANNELS: u16 = 2;
 
-/// The quality the user selected in Spotify's own settings. Spytify cannot
+/// The quality the user selected in Spotify's own settings. Resona cannot
 /// read it from the client, so it is a user setting that drives the default
 /// output format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,7 +3,7 @@
 //! along with the Windows settings that decide it.
 //!
 //! ```text
-//! cargo run -p spytify-core --example capture_spotify -- [seconds] [out.flac]
+//! cargo run -p resona-core --example capture_spotify -- [seconds] [out.flac]
 //! ```
 
 #[cfg(windows)]
@@ -12,13 +12,13 @@ fn main() -> anyhow::Result<()> {
     use std::time::{Duration, Instant};
 
     use crossbeam_channel::RecvTimeoutError;
-    use spytify_core::Error;
-    use spytify_core::analysis::{self, BitAnalysis};
-    use spytify_core::audio_setup;
-    use spytify_core::capture::{CaptureConfig, ProcessCapture};
-    use spytify_core::encode::{Quantizer, flac, wav::CaptureWav};
-    use spytify_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
-    use spytify_core::spotify::process::SpotifyProcesses;
+    use resona_core::Error;
+    use resona_core::analysis::{self, BitAnalysis};
+    use resona_core::audio_setup;
+    use resona_core::capture::{CaptureConfig, ProcessCapture};
+    use resona_core::encode::{Quantizer, flac, wav::CaptureWav};
+    use resona_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+    use resona_core::spotify::process::SpotifyProcesses;
 
     // flacenc logs its worker statistics at INFO.
     tracing_subscriber::fmt()
@@ -71,8 +71,8 @@ fn main() -> anyhow::Result<()> {
         processes.root
     );
 
-    // SPYTIFY_FORCE_STEREO=1 lets Windows downmix to stereo, for comparison.
-    let (channels, mask) = if std::env::var_os("SPYTIFY_FORCE_STEREO").is_some() {
+    // RESONA_FORCE_STEREO=1 lets Windows downmix to stereo, for comparison.
+    let (channels, mask) = if std::env::var_os("RESONA_FORCE_STEREO").is_some() {
         println!("forcing a stereo capture (Windows downmix)");
         (2, 0x3)
     } else {
@@ -187,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     flac::encode_wav_to_flac(&intermediate, &output, Quantizer::new(bits, bits))?;
-    if std::env::var_os("SPYTIFY_KEEP_WAV").is_some() {
+    if std::env::var_os("RESONA_KEEP_WAV").is_some() {
         println!("kept the raw float capture: {}", intermediate.display());
     } else {
         std::fs::remove_file(&intermediate)?;

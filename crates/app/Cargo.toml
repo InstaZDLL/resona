@@ -1,6 +1,6 @@
 [package]
-name = "spytify"
-description = "Spytify desktop app (Slint UI)."
+name = "resona"
+description = "Records the Spotify desktop client, lossless, one file per track."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,7 +19,7 @@ slint = { version = "1.18", default-features = false, features = [
     "renderer-software",
     "compat-1-18",
 ] }
-spytify-core = { path = "../core" }
+resona-core = { path = "../core" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
@@ -29,3 +29,23 @@ wasapi = "0.24"
 
 [build-dependencies]
 slint-build = "1.18"
+winresource = "0.1"
+
+# Installer: `cargo packager --release -p resona` (cargo-packager, NSIS).
+# Per-user, no administrator rights, like the app itself needs none.
+[package.metadata.packager]
+product-name = "Resona"
+identifier = "io.github.instazdll.resona"
+publisher = "InstaZDLL"
+category = "Music"
+formats = ["nsis"]
+icons = ["assets/resona.ico"]
+out-dir = "../../target/packager"
+before-packaging-command = "cargo build --release -p resona"
+binaries = [{ path = "resona", main = true }]
+
+[package.metadata.packager.nsis]
+installer-icon = "assets/resona.ico"
+installer-mode = "currentUser"
+languages = ["French", "English"]
+display-language-selector = false

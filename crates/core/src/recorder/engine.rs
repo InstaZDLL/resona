@@ -45,7 +45,7 @@ const TITLE_LAG: Duration = Duration::from_millis(250);
 /// Shortfall against SMTC's duration still counted as a complete track
 /// (silence trimmed at both ends, Spotify's own rounding).
 const PARTIAL_TOLERANCE: Duration = Duration::from_secs(3);
-const TEMP_DIR: &str = ".spytify-tmp";
+const TEMP_DIR: &str = ".resona-tmp";
 
 #[derive(Debug, Clone)]
 pub struct RecorderConfig {
@@ -144,7 +144,7 @@ impl Recorder {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let (stop_tx, stop_rx) = crossbeam_channel::bounded(1);
         let thread = thread::Builder::new()
-            .name("spytify-recorder".into())
+            .name("resona-recorder".into())
             .spawn(move || {
                 if let Err(e) = run(&config, &events_tx, &stop_rx) {
                     let _ = events_tx.send(RecorderEvent::Error(e.to_string()));
@@ -309,7 +309,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
         let config = config.clone();
         let library = Arc::clone(&library);
         thread::Builder::new()
-            .name("spytify-encoder".into())
+            .name("resona-encoder".into())
             .spawn(move || encode_jobs(&config, &library, &jobs_rx, &events))?
     };
 
@@ -425,7 +425,7 @@ impl PlayingWatch {
         let stop = Arc::new(AtomicBool::new(false));
         let (thread_latest, thread_stop) = (Arc::clone(&latest), Arc::clone(&stop));
         thread::Builder::new()
-            .name("spytify-catalogue-watch".into())
+            .name("resona-catalogue-watch".into())
             .spawn(move || {
                 while !thread_stop.load(Ordering::Relaxed) {
                     if let Ok(playing) = cli.now_playing()

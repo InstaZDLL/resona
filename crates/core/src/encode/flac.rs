@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn encodes_a_24_bit_capture() {
-        let dir = std::env::temp_dir().join(format!("spytify-flac-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-flac-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav_path, flac_path) = (dir.join("in.wav"), dir.join("out.flac"));
 

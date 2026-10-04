@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn unique_path_numbers_duplicates() {
-        let dir = std::env::temp_dir().join(format!("spytify-naming-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-naming-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("A - B.flac"), b"").unwrap();
         std::fs::write(dir.join("A - B (2).flac"), b"").unwrap();

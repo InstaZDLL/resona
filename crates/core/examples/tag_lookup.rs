@@ -1,15 +1,15 @@
-//! Phase 4 harness: the tags Spytify would write for a track.
+//! Phase 4 harness: the tags Resona would write for a track.
 //!
 //! ```text
-//! cargo run -p spytify-core --example tag_lookup -- "Artist" "Title" ["Album"] [seconds] [--uri=spotify:track:…]
+//! cargo run -p resona-core --example tag_lookup -- "Artist" "Title" ["Album"] [seconds] [--uri=spotify:track:…]
 //! ```
 
 use std::time::Duration;
 
-use spytify_core::metadata::deezer::DeezerClient;
-use spytify_core::metadata::tags_for;
-use spytify_core::spotify::state::{Track, TrackDetails};
-use spytify_core::spotify::title;
+use resona_core::metadata::deezer::DeezerClient;
+use resona_core::metadata::tags_for;
+use resona_core::spotify::state::{Track, TrackDetails};
+use resona_core::spotify::title;
 
 fn main() -> anyhow::Result<()> {
     let (flags, args): (Vec<String>, Vec<String>) =
@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
                 .map(Duration::from_secs),
         },
     };
-    let cli = spytify_core::spotify::cli::SpotifyCli::find().ok();
+    let cli = resona_core::spotify::cli::SpotifyCli::find().ok();
     let (tags, outcome) = tags_for(Some(&DeezerClient::new()?), cli.as_ref(), &track, uri);
     println!("{outcome:?}\n{tags:#?}");
     Ok(())

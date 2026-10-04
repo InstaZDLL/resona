@@ -1,8 +1,8 @@
 //! Offline look at a raw float capture kept by `capture_spotify`
-//! (`SPYTIFY_KEEP_WAV=1`): where the samples off the 24-bit grid are.
+//! (`RESONA_KEEP_WAV=1`): where the samples off the 24-bit grid are.
 //!
 //! ```text
-//! cargo run -p spytify-core --example analyze_wav -- capture.capture.wav
+//! cargo run -p resona-core --example analyze_wav -- capture.capture.wav
 //! ```
 //!
 //! - by level: a peak limiter only touches the loudest samples;
@@ -11,7 +11,7 @@
 //! - by residual: f32 keeps 24 significant bits, so a loud sample can only
 //!   be off by half a 24-bit step, a quieter one by finer amounts.
 
-use spytify_core::analysis::BitAnalysis;
+use resona_core::analysis::BitAnalysis;
 
 const SCALE_24: f64 = 8_388_608.0;
 
