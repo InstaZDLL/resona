@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
-use spytify_core::format::{BitDepth, OutputFormat};
-use spytify_core::recorder::library::ExistingTracks;
-use spytify_core::recorder::naming::{Folders, Prefix};
-use spytify_core::settings::{Language, Quality};
+use resona_core::format::{BitDepth, OutputFormat};
+use resona_core::recorder::library::ExistingTracks;
+use resona_core::recorder::naming::{Folders, Prefix};
+use resona_core::settings::{Language, Quality};
 
 pub const FORMATS: [OutputFormat; 11] = [
     OutputFormat::Flac {

@@ -90,7 +90,7 @@ impl PlaylistSession {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let (stop_tx, stop_rx) = crossbeam_channel::bounded(1);
         let thread = thread::Builder::new()
-            .name("spytify-playlist".into())
+            .name("resona-playlist".into())
             .spawn(move || {
                 let _ = wasapi::initialize_mta();
                 run(config, source, &events_tx, &stop_rx);
@@ -353,7 +353,7 @@ fn watch() -> Result<Receiver<Option<NowPlaying>>> {
     let cli = SpotifyCli::find()?;
     let (seen_tx, seen_rx) = crossbeam_channel::bounded(1);
     thread::Builder::new()
-        .name("spytify-now-playing".into())
+        .name("resona-now-playing".into())
         .spawn(move || {
             loop {
                 match cli.now_playing() {

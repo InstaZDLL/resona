@@ -189,8 +189,8 @@ msgstr "Faire passer Spotify par un câble virtuel"
 msgid "Install VB-Cable (vb-audio.com/Cable) to use it. Your headset's settings (44100 Hz, enhancements, surround) then no longer affect the recordings."
 msgstr "Installez VB-Cable (vb-audio.com/Cable) pour l'utiliser. Les réglages de votre casque (44100 Hz, améliorations, son surround) n'affecteront alors plus les enregistrements."
 
-msgid "While recording, Spotify plays silently on \"{}\", set up by Spytify: your headset's settings no longer affect the recordings, and you can listen to something else."
-msgstr "Pendant l'enregistrement, Spotify joue en silence sur « {} », réglé par Spytify : les réglages de votre casque n'affectent plus les enregistrements, et vous pouvez écouter autre chose."
+msgid "While recording, Spotify plays silently on \"{}\", set up by Resona: your headset's settings no longer affect the recordings, and you can listen to something else."
+msgstr "Pendant l'enregistrement, Spotify joue en silence sur « {} », réglé par Resona : les réglages de votre casque n'affectent plus les enregistrements, et vous pouvez écouter autre chose."
 
 msgid "Hear Spotify while recording"
 msgstr "Entendre Spotify pendant l'enregistrement"
@@ -244,8 +244,8 @@ msgstr "⚠ La normalisation du volume de Spotify est activée : elle modifie le
 msgid "⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off."
 msgstr "⚠ Automix de Spotify est activé : il mixe les transitions des playlists. Spotify → Paramètres → Lecture → Automix → désactivé."
 
-msgid "⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Spytify's settings."
-msgstr "⚠ Spotify ne lit pas en Lossless. Spotify → Paramètres → Qualité audio → Lossless, ou changez la qualité Spotify dans les réglages de Spytify."
+msgid "⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings."
+msgstr "⚠ Spotify ne lit pas en Lossless. Spotify → Paramètres → Qualité audio → Lossless, ou changez la qualité Spotify dans les réglages de Resona."
 
 msgid "⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings."
 msgstr "⚠ Morceaux modifiés entre Spotify et l'enregistrement : {} (dernier : « {} »). Vérifiez le volume de Spotify et les réglages audio."
@@ -255,3 +255,13 @@ msgstr "⚠ Le volume de Spotify est à {} % : les enregistrements sont atténu�
 
 msgid "Set Spotify to 100 %"
 msgstr "Mettre Spotify à 100 %"
+
+# Updates
+msgid "Resona {} is available."
+msgstr "Resona {} est disponible."
+
+msgid "Download it"
+msgstr "La télécharger"
+
+msgid "Check for updates at launch"
+msgstr "Rechercher les mises à jour au lancement"

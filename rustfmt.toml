@@ -1,4 +1,4 @@
-# rustfmt configuration for Spytify
+# rustfmt configuration for Resona
 # Applied to the whole workspace.
 # Run with: cargo fmt --all
 

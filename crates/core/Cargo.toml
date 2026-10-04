@@ -1,6 +1,6 @@
 [package]
-name = "spytify-core"
-description = "Spotify detection, per-process capture, encoding and tagging for Spytify. No UI."
+name = "resona-core"
+description = "Spotify detection, per-process capture, encoding and tagging for Resona. No UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -4254,6 +4254,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "resona"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "image",
+ "resona-core",
+ "rfd",
+ "slint",
+ "slint-build",
+ "tracing",
+ "tracing-subscriber",
+ "tray-icon",
+ "wasapi",
+ "winresource",
+]
+
+[[package]]
+name = "resona-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "claxon",
+ "crossbeam-channel",
+ "flacenc",
+ "hound",
+ "lofty",
+ "mp3lame-encoder",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "thiserror 2.0.21",
+ "toml 1.1.6+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "wasapi",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
 name = "resvg"
 version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4876,47 +4918,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f"
 dependencies = [
  "bitflags 2.13.2",
-]
-
-[[package]]
-name = "spytify"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossbeam-channel",
- "image",
- "rfd",
- "slint",
- "slint-build",
- "spytify-core",
- "tracing",
- "tracing-subscriber",
- "tray-icon",
- "wasapi",
-]
-
-[[package]]
-name = "spytify-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claxon",
- "crossbeam-channel",
- "flacenc",
- "hound",
- "lofty",
- "mp3lame-encoder",
- "reqwest",
- "serde",
- "serde_json",
- "sysinfo",
- "thiserror 2.0.21",
- "toml 1.1.6+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "wasapi",
- "windows",
- "windows-core",
 ]
 
 [[package]]
@@ -6500,6 +6501,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+dependencies = [
+ "toml 1.1.6+spec-1.1.0",
+ "version_check",
 ]
 
 [[package]]

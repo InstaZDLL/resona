@@ -9,20 +9,20 @@ use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
-use spytify_core::analysis::Fidelity;
-use spytify_core::audio_setup::{CableAsDefault, SetupIssue};
-use spytify_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
-use spytify_core::recorder::playlist_session::{
+use resona_core::analysis::Fidelity;
+use resona_core::audio_setup::{CableAsDefault, SetupIssue};
+use resona_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
+use resona_core::recorder::playlist_session::{
     Entry, EntryState, PlaylistEvent, PlaylistSession, Source,
 };
-use spytify_core::settings::Settings;
-use spytify_core::spotify::cli::SpotifyCli;
-use spytify_core::spotify::link::SpotifyLink;
-use spytify_core::spotify::monitor::{Monitor, MonitorEvent};
-use spytify_core::spotify::prefs::{PrefsIssue, SpotifyPrefs};
-use spytify_core::spotify::state::{Content, Event};
-use spytify_core::spotify::title::TrackTitle;
+use resona_core::settings::Settings;
+use resona_core::spotify::cli::SpotifyCli;
+use resona_core::spotify::link::SpotifyLink;
+use resona_core::spotify::monitor::{Monitor, MonitorEvent};
+use resona_core::spotify::prefs::{PrefsIssue, SpotifyPrefs};
+use resona_core::spotify::state::{Content, Event};
+use resona_core::spotify::title::TrackTitle;
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 
 use crate::cover::CoverLoader;
 use crate::mapping::{self, at, index_of};
@@ -167,7 +167,7 @@ pub fn run() -> anyhow::Result<()> {
             // The natural format for the tier, which the user may still
             // change afterwards.
             let quality = at(&mapping::QUALITIES, index);
-            let format = spytify_core::format::SpotifyQuality::from(quality).default_output();
+            let format = resona_core::format::SpotifyQuality::from(quality).default_output();
             window.set_format_index(index_of(&mapping::FORMATS, &format));
             let mut settings = settings.borrow_mut();
             read_settings(&window, &mut settings);
@@ -238,6 +238,15 @@ pub fn run() -> anyhow::Result<()> {
     });
     check_spotify_volume(window.as_weak());
 
+    window.on_open_url(|url| {
+        let _ = std::process::Command::new("explorer")
+            .arg(url.as_str())
+            .spawn();
+    });
+    if settings.borrow().check_updates {
+        check_for_update(window.as_weak());
+    }
+
     window.on_open_cable_site(|| {
         let _ = std::process::Command::new("explorer")
             .arg("https://vb-audio.com/Cable/")
@@ -249,12 +258,12 @@ pub fn run() -> anyhow::Result<()> {
         let weak = window.as_weak();
         thread::spawn(move || {
             let _ = wasapi::initialize_mta();
-            let cable = spytify_core::audio_setup::virtual_cable()
+            let cable = resona_core::audio_setup::virtual_cable()
                 .ok()
                 .flatten()
                 .map(|(_, name)| name)
                 .unwrap_or_default();
-            let as_default = spytify_core::audio_setup::cable_as_default().ok().flatten();
+            let as_default = resona_core::audio_setup::cable_as_default().ok().flatten();
             let _ = weak.upgrade_in_event_loop(move |w| {
                 w.set_cable_name(cable.into());
                 if let Some(as_default) = as_default {
@@ -270,7 +279,7 @@ pub fn run() -> anyhow::Result<()> {
             let weak = weak.clone();
             thread::spawn(move || {
                 let _ = wasapi::initialize_mta();
-                let result = spytify_core::device_config::set_default_device(&id);
+                let result = resona_core::device_config::set_default_device(&id);
                 let _ = weak.upgrade_in_event_loop(move |w| {
                     let notices = w.get_notices();
                     let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
@@ -566,7 +575,7 @@ fn reason_of(reason: DiscardReason) -> Reason {
     }
 }
 
-fn select_language(language: spytify_core::settings::Language) {
+fn select_language(language: resona_core::settings::Language) {
     if let Err(e) = slint::select_bundled_translation(mapping::language_code(language)) {
         tracing::warn!("translation: {e}");
     }
@@ -590,6 +599,7 @@ fn show_settings(window: &AppWindow, settings: &Settings) {
     window.set_skip_in_spotify(settings.skip_existing_in_spotify);
     window.set_mute_ads(settings.mute_ads);
     window.set_virtual_cable(settings.virtual_cable);
+    window.set_check_updates(settings.check_updates);
     window.set_listen(settings.listen);
     window.set_language_index(index_of(&mapping::LANGUAGES, &settings.language));
 }
@@ -605,6 +615,7 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
     settings.skip_existing_in_spotify = window.get_skip_in_spotify();
     settings.mute_ads = window.get_mute_ads();
     settings.virtual_cable = window.get_virtual_cable();
+    settings.check_updates = window.get_check_updates();
     settings.listen = window.get_listen();
 }
 
@@ -841,7 +852,7 @@ fn check_spotify_settings(notices: &VecModel<Notice>, settings: &Settings) {
     let Some(prefs) = SpotifyPrefs::load() else {
         return;
     };
-    let lossless = settings.spotify_quality == spytify_core::settings::Quality::Lossless;
+    let lossless = settings.spotify_quality == resona_core::settings::Quality::Lossless;
     for issue in prefs.issues(lossless) {
         let kind = match issue {
             PrefsIssue::Normalize => Warning::SpotifyNormalize,
@@ -901,6 +912,31 @@ fn check_spotify_volume(window: Weak<AppWindow>) {
                     kind: Warning::SpotifyVolume,
                     detail: volume.to_string().into(),
                     ..Notice::default()
+                });
+            }
+        });
+    });
+}
+
+/// Offers a newer release from GitHub, without blocking the UI. Quiet when
+/// offline or up to date.
+fn check_for_update(window: Weak<AppWindow>) {
+    thread::spawn(move || {
+        let release = match resona_core::update::newer_release(env!("CARGO_PKG_VERSION")) {
+            Ok(Some(release)) => release,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!("update check: {e}");
+                return;
+            }
+        };
+        let _ = window.upgrade_in_event_loop(move |w| {
+            let notices = w.get_notices();
+            if let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() {
+                notices.push(Notice {
+                    kind: Warning::Update,
+                    device: release.version.into(),
+                    detail: release.url.into(),
                 });
             }
         });

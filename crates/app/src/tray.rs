@@ -1,18 +1,14 @@
-//! The notification area icon: keeps Spytify reachable while its window is
+//! The notification area icon: keeps Resona reachable while its window is
 //! closed during a recording.
 //!
 //! Its menu is native (not Slint), so its few strings are translated here.
 
+use resona_core::settings::Language;
 use slint::{ComponentHandle, Weak};
-use spytify_core::settings::Language;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::AppWindow;
-
-const ICON_SIZE: u32 = 32;
-const GREEN: [u8; 3] = [0x1d, 0xb9, 0x54];
-const RED: [u8; 3] = [0xe5, 0x48, 0x4d];
 
 pub struct Tray {
     icon: TrayIcon,
@@ -33,8 +29,8 @@ impl Tray {
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
-            .with_icon(dot(GREEN)?)
-            .with_tooltip("Spytify")
+            .with_icon(icon(false)?)
+            .with_tooltip("Resona")
             .build()?;
 
         // Both handlers run on the UI thread's message loop, but outside
@@ -87,9 +83,9 @@ impl Tray {
         self.toggle
             .set_text(if recording { text.stop } else { text.start });
         self.quit.set_text(text.quit);
-        let tooltip = if recording { text.recording } else { "Spytify" };
+        let tooltip = if recording { text.recording } else { "Resona" };
         let _ = self.icon.set_tooltip(Some(tooltip));
-        if let Ok(icon) = dot(if recording { RED } else { GREEN }) {
+        if let Ok(icon) = icon(recording) {
             let _ = self.icon.set_icon(Some(icon));
         }
     }
@@ -112,35 +108,31 @@ impl Texts {
     fn of(language: Language) -> Self {
         match language {
             Language::Fr => Self {
-                show: "Afficher Spytify",
+                show: "Afficher Resona",
                 start: "Démarrer l'enregistrement",
                 stop: "Arrêter l'enregistrement",
                 quit: "Quitter",
-                recording: "Spytify — enregistrement en cours",
+                recording: "Resona — enregistrement en cours",
             },
             Language::En => Self {
-                show: "Show Spytify",
+                show: "Show Resona",
                 start: "Start recording",
                 stop: "Stop recording",
                 quit: "Quit",
-                recording: "Spytify — recording",
+                recording: "Resona — recording",
             },
         }
     }
 }
 
-/// A filled disc, the record button's colour.
-fn dot([r, g, b]: [u8; 3]) -> anyhow::Result<Icon> {
-    let centre = (ICON_SIZE as f32 - 1.0) / 2.0;
-    let radius = ICON_SIZE as f32 / 2.0 - 2.0;
-    let mut rgba = Vec::with_capacity((ICON_SIZE * ICON_SIZE * 4) as usize);
-    for y in 0..ICON_SIZE {
-        for x in 0..ICON_SIZE {
-            let distance = (x as f32 - centre).hypot(y as f32 - centre);
-            // One pixel of anti-aliasing at the edge.
-            let alpha = (radius + 0.5 - distance).clamp(0.0, 1.0);
-            rgba.extend_from_slice(&[r, g, b, (alpha * 255.0) as u8]);
-        }
-    }
-    Ok(Icon::from_rgba(rgba, ICON_SIZE, ICON_SIZE)?)
+/// The app icon, red while recording.
+fn icon(recording: bool) -> anyhow::Result<Icon> {
+    let png: &[u8] = if recording {
+        include_bytes!("../assets/tray-recording.png")
+    } else {
+        include_bytes!("../assets/tray.png")
+    };
+    let image = image::load_from_memory(png)?.into_rgba8();
+    let (width, height) = image.dimensions();
+    Ok(Icon::from_rgba(image.into_raw(), width, height)?)
 }

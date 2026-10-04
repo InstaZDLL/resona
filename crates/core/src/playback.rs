@@ -39,7 +39,7 @@ impl Playback {
         let avoid = avoid.to_owned();
         let thread_stop = Arc::clone(&stop);
         let thread = thread::Builder::new()
-            .name("spytify-playback".into())
+            .name("resona-playback".into())
             .spawn(move || {
                 if let Err(e) = play(&avoid, &samples_rx, &ready_tx, &thread_stop) {
                     // Before the stream started, `ready` carries the error.

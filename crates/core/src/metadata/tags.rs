@@ -167,7 +167,7 @@ impl TrackTags {
         }
         tag.insert(
             "ENCODER".to_owned(),
-            concat!("Spytify ", env!("CARGO_PKG_VERSION")).to_owned(),
+            concat!("Resona ", env!("CARGO_PKG_VERSION")).to_owned(),
         );
         if let Some(cover) = &self.cover {
             let picture = Picture::unchecked(cover.data.clone())
@@ -227,7 +227,7 @@ impl TrackTags {
         put(ItemKey::DiscNumber, self.disc_number.map(|n| n.to_string()));
         put(
             ItemKey::EncoderSoftware,
-            Some(concat!("Spytify ", env!("CARGO_PKG_VERSION")).to_owned()),
+            Some(concat!("Resona ", env!("CARGO_PKG_VERSION")).to_owned()),
         );
         for genre in &self.genres {
             tag.push(TagItem::new(ItemKey::Genre, ItemValue::Text(genre.clone())));
@@ -307,7 +307,7 @@ mod tests {
         use lofty::file::TaggedFileExt;
         use lofty::tag::ItemKey;
 
-        let dir = std::env::temp_dir().join(format!("spytify-tags-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-tags-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav, flac) = (dir.join("t.wav"), dir.join("t.flac"));
         let mut writer = CaptureWav::create(&wav).unwrap();
@@ -342,7 +342,7 @@ mod tests {
         use lofty::file::TaggedFileExt;
         use lofty::tag::ItemKey;
 
-        let dir = std::env::temp_dir().join(format!("spytify-id3-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-id3-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav, mp3) = (dir.join("t.wav"), dir.join("t.mp3"));
         let mut writer = CaptureWav::create(&wav).unwrap();

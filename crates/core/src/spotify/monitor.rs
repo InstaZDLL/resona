@@ -129,7 +129,7 @@ impl Monitor {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let thread = thread::Builder::new()
-            .name("spytify-monitor".into())
+            .name("resona-monitor".into())
             .spawn(move || run(&events_tx, &thread_stop, &audio_active))?;
         Ok((
             Self {

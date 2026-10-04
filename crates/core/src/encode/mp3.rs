@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn encodes_a_playable_cbr_mp3() {
-        let dir = std::env::temp_dir().join(format!("spytify-mp3-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-mp3-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav, mp3) = (dir.join("in.wav"), dir.join("out.mp3"));
         let samples: Vec<f32> = (0..44_100 * 2 * 3)

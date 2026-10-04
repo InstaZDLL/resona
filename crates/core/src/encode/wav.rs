@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn exports_integer_pcm() {
-        let dir = std::env::temp_dir().join(format!("spytify-wav-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("resona-wav-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (capture, out) = (dir.join("track.wav"), dir.join("track.out.wav"));
         let values = [1234, -32_768, 32_767, 0];

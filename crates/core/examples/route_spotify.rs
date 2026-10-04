@@ -2,13 +2,13 @@
 //! virtual cable or back to the default device.
 //!
 //! ```text
-//! cargo run -p spytify-core --example route_spotify -- [cable|default|cable-rate]
+//! cargo run -p resona-core --example route_spotify -- [cable|default|cable-rate]
 //! ```
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
-    use spytify_core::spotify::process::SpotifyProcesses;
-    use spytify_core::{Error, audio_setup, routing};
+    use resona_core::spotify::process::SpotifyProcesses;
+    use resona_core::{Error, audio_setup, routing};
 
     let _ = wasapi::initialize_mta();
     let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
             let (id, name) = cable
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("no virtual cable installed"))?;
-            spytify_core::device_config::set_sample_rate(id, 44100)?;
+            resona_core::device_config::set_sample_rate(id, 44100)?;
             println!("{name} set to 44100 Hz");
         }
         Some(other) => anyhow::bail!("unknown action {other:?}: cable, default or cable-rate"),

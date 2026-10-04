@@ -17,5 +17,5 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("Spytify records the Spotify desktop client and needs Windows.");
+    eprintln!("Resona records the Spotify desktop client and needs Windows.");
 }

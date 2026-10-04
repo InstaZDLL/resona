@@ -66,7 +66,7 @@ impl ProcessCapture {
 
         let thread_stop = Arc::clone(&stop);
         let thread = thread::Builder::new()
-            .name("spytify-capture".into())
+            .name("resona-capture".into())
             .spawn(move || capture_thread(config, &packets_tx, &ready_tx, &thread_stop))?;
 
         let mut capture = Self {

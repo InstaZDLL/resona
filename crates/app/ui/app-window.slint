@@ -5,7 +5,7 @@ export enum TrackState { waiting, recording, saved, discarded, already-recorded,
 /// Quality of a saved or discarded track, from the fidelity analysis.
 export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
 export enum Reason { none, partial, too-short, already-recorded }
-export enum Warning { enhancements, sample-rate, processed, spotify-volume, spotify-fades, spotify-normalize, spotify-automix, spotify-not-lossless, cable-missing, cable-default, error }
+export enum Warning { update, enhancements, sample-rate, processed, spotify-volume, spotify-fades, spotify-normalize, spotify-automix, spotify-not-lossless, cable-missing, cable-default, error }
 
 export struct TrackRow {
     title: string,
@@ -236,6 +236,7 @@ export component AppWindow inherits Window {
     in-out property <bool> mute-ads: true;
     in-out property <bool> virtual-cable;
     in-out property <bool> listen;
+    in-out property <bool> check-updates: true;
     in-out property <int> language-index;
     /// The installed virtual cable, empty if none.
     in property <string> cable-name;
@@ -249,13 +250,15 @@ export component AppWindow inherits Window {
     /// Makes the device `id` the Windows default again.
     callback restore-default-device(string);
     callback spotify-volume-max();
+    callback open-url(string);
     callback quality-changed(int);
     callback settings-changed();
     callback language-changed(int);
 
     property <bool> settings-open;
 
-    title: "Spytify";
+    title: "Resona";
+    icon: @image-url("../assets/icon.png");
     min-width: 460px;
     min-height: 620px;
     preferred-width: 480px;
@@ -270,7 +273,7 @@ export component AppWindow inherits Window {
         // Header
         HorizontalLayout {
             Text {
-                text: "Spytify";
+                text: "Resona";
                 font-size: 20px;
                 font-weight: 800;
                 color: #1d1d1f;
@@ -367,10 +370,11 @@ export component AppWindow inherits Window {
                         : notice.kind == Warning.spotify-fades ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
                         : notice.kind == Warning.spotify-normalize ? @tr("⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off.")
                         : notice.kind == Warning.spotify-automix ? @tr("⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off.")
-                        : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Spytify's settings.")
+                        : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings.")
                         : notice.kind == Warning.cable-default ? @tr("⚠ The virtual cable is the Windows default output device: nothing can be heard.")
                         : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings.", notice.device, notice.detail)
                         : notice.kind == Warning.spotify-volume ? @tr("⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless.", notice.detail)
+                        : notice.kind == Warning.update ? @tr("Resona {} is available.", notice.device)
                         : notice.detail;
                 }
                 if notice.kind == Warning.cable-default && notice.device != "": Text {
@@ -380,6 +384,15 @@ export component AppWindow inherits Window {
                     TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.restore-default-device(notice.detail); }
+                    }
+                }
+                if notice.kind == Warning.update: Text {
+                    text: @tr("Download it");
+                    color: #0a84ff;
+                    font-weight: 700;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.open-url(notice.detail); }
                     }
                 }
                 if notice.kind == Warning.spotify-volume: Text {
@@ -623,7 +636,7 @@ export component AppWindow inherits Window {
                             text: @tr("Play Spotify through a virtual cable");
                             hint: root.cable-name == ""
                                 ? @tr("Install VB-Cable (vb-audio.com/Cable) to use it. Your headset's settings (44100 Hz, enhancements, surround) then no longer affect the recordings.")
-                                : @tr("While recording, Spotify plays silently on \"{}\", set up by Spytify: your headset's settings no longer affect the recordings, and you can listen to something else.", root.cable-name);
+                                : @tr("While recording, Spotify plays silently on \"{}\", set up by Resona: your headset's settings no longer affect the recordings, and you can listen to something else.", root.cable-name);
                             enabled: root.cable-name != "" || root.virtual-cable;
                             checked <=> root.virtual-cable;
                             toggled => { root.settings-changed(); }
@@ -663,6 +676,11 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                                 selected => { root.language-changed(self.current-index); }
                             }
+                        }
+                        Option {
+                            text: @tr("Check for updates at launch");
+                            checked <=> root.check-updates;
+                            toggled => { root.settings-changed(); }
                         }
                     }
 
