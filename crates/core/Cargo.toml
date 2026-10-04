@@ -4,6 +4,8 @@ description = "Spotify detection, per-process capture, encoding and tagging for 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 crossbeam-channel = "0.5.17"
