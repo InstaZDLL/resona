@@ -324,3 +324,10 @@ msgstr "Conseils pour un son sans perte"
 
 msgid "Your music, saved here"
 msgstr "Votre musique, à retrouver ici"
+
+# Lyrics
+msgid "Save lyrics next to each track (.lrc)"
+msgstr "Enregistrer les paroles à côté de chaque morceau (.lrc)"
+
+msgid "From LRCLIB, an open lyrics database: synced when it has the timing, plain otherwise."
+msgstr "Depuis LRCLIB, une base de paroles ouverte : synchronisées quand elle a le minutage, simples sinon."

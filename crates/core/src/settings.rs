@@ -32,6 +32,9 @@ pub struct Settings {
     pub listen: bool,
     /// Ask GitHub for a newer release at launch.
     pub check_updates: bool,
+    /// Lyrics from LRCLIB (synced when available), as a `.lrc` file next
+    /// to each track.
+    pub lyrics: bool,
     pub language: Language,
 }
 
@@ -82,6 +85,7 @@ impl Default for Settings {
             virtual_cable: false,
             listen: false,
             check_updates: true,
+            lyrics: true,
             language: Language::En,
         }
     }
@@ -157,6 +161,7 @@ impl Settings {
             mute_ads: self.mute_ads,
             virtual_cable: self.virtual_cable,
             listen: self.listen,
+            lyrics: self.lyrics,
         }
     }
 

@@ -247,6 +247,7 @@ export component AppWindow inherits Window {
     in-out property <bool> virtual-cable;
     in-out property <bool> listen;
     in-out property <bool> check-updates: true;
+    in-out property <bool> lyrics: true;
     in-out property <int> language-index;
     /// The installed virtual cable, empty if none.
     in property <string> cable-name;
@@ -695,6 +696,12 @@ export component AppWindow inherits Window {
                                 text: @tr("Make Spotify skip tracks already recorded");
                                 enabled: root.existing-index == 0;
                                 checked <=> root.skip-in-spotify;
+                                toggled => { root.settings-changed(); }
+                            }
+                            Option {
+                                text: @tr("Save lyrics next to each track (.lrc)");
+                                hint: @tr("From LRCLIB, an open lyrics database: synced when it has the timing, plain otherwise.");
+                                checked <=> root.lyrics;
                                 toggled => { root.settings-changed(); }
                             }
                         }

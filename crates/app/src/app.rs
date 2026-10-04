@@ -493,6 +493,7 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
                         duration,
                         tags,
                         path,
+                        ..
                     },
                     Some((index, mut row)),
                 ) if row.state == TrackState::Saved => {
@@ -589,6 +590,7 @@ fn show_settings(window: &AppWindow, settings: &Settings) {
     window.set_mute_ads(settings.mute_ads);
     window.set_virtual_cable(settings.virtual_cable);
     window.set_check_updates(settings.check_updates);
+    window.set_lyrics(settings.lyrics);
     window.set_listen(settings.listen);
     window.set_language_index(index_of(&mapping::LANGUAGES, &settings.language));
 }
@@ -605,6 +607,7 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
     settings.mute_ads = window.get_mute_ads();
     settings.virtual_cable = window.get_virtual_cable();
     settings.check_updates = window.get_check_updates();
+    settings.lyrics = window.get_lyrics();
     settings.listen = window.get_listen();
 }
 
@@ -725,6 +728,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             fidelity,
             duration,
             tags,
+            ..
         } => {
             let mut saved = row(&title, TrackState::Saved);
             describe(&mut saved, fidelity, duration);

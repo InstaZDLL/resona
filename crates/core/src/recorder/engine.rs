@@ -25,6 +25,7 @@ use crate::encode::{Quantizer, flac, mp3, wav, wav::CaptureWav};
 use crate::format::CAPTURE_SAMPLE_RATE;
 use crate::format::OutputFormat;
 use crate::metadata::deezer::DeezerClient;
+use crate::metadata::lyrics::{Lyrics, LyricsClient, LyricsQuery};
 use crate::metadata::name_match::title_similarity;
 use crate::metadata::{self, TagsOutcome};
 use crate::playback::Playback;
@@ -34,7 +35,7 @@ use crate::spotify::cli::{NowPlaying, SpotifyCli};
 use crate::spotify::monitor::{Monitor, MonitorEvent};
 use crate::spotify::process::SpotifyProcesses;
 use crate::spotify::smtc::Smtc;
-use crate::spotify::state::{Content, Event};
+use crate::spotify::state::{Content, Event, Track};
 use crate::spotify::title::TrackTitle;
 use crate::{Error, Result};
 
@@ -75,6 +76,9 @@ pub struct RecorderConfig {
     /// With [`Self::virtual_cable`]: play what is recorded on the default
     /// device, to hear Spotify. Off, Spotify is silent while recording.
     pub listen: bool,
+    /// Write lyrics (LRCLIB, synced when available) as a `.lrc` file next
+    /// to each track.
+    pub lyrics: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +118,8 @@ pub enum RecorderEvent {
         duration: Duration,
         /// Where the tags beyond Spotify's own came from, or why not.
         tags: TagsOutcome,
+        /// The `.lrc` next to the file.
+        lyrics: LyricsOutcome,
     },
     Discarded {
         title: TrackTitle,
@@ -629,6 +635,8 @@ fn unique_stamp() -> String {
 struct Catalogues {
     deezer: Option<DeezerClient>,
     spotify: Option<SpotifyCli>,
+    /// Only with [`RecorderConfig::lyrics`].
+    lyrics: Option<LyricsClient>,
 }
 
 fn encode_jobs(
@@ -644,6 +652,13 @@ fn encode_jobs(
         spotify: SpotifyCli::find()
             .inspect_err(|e| tracing::warn!("no Spotify catalogue: {e}"))
             .ok(),
+        lyrics: if config.lyrics {
+            LyricsClient::new()
+                .inspect_err(|e| tracing::warn!("no lyrics client: {e}"))
+                .ok()
+        } else {
+            None
+        },
     };
     // Order of the tracks saved in this session, for `Prefix::OrderNumber`.
     let mut order = 0;
@@ -752,6 +767,7 @@ fn encode(
         }
         (ExistingTracks::Replace, Some(old)) => {
             std::fs::remove_file(&old)?;
+            let _ = std::fs::remove_file(old.with_extension("lrc"));
             library.remove(&old);
             config.output_dir.join(&relative)
         }
@@ -768,11 +784,73 @@ fn encode(
     std::fs::rename(&staged, &path)?;
     library.add(path.clone());
     drop(library);
+    let lyrics = match &catalogues.lyrics {
+        Some(client) => write_lyrics(
+            client,
+            &job.ended.track,
+            tags.album.as_deref(),
+            duration,
+            &path,
+        ),
+        None if config.lyrics => LyricsOutcome::Failed("no HTTP client".into()),
+        None => LyricsOutcome::Off,
+    };
     Ok(RecorderEvent::Saved {
         title,
         path,
         fidelity,
         duration,
         tags: outcome,
+        lyrics,
     })
+}
+
+/// What became of a track's lyrics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LyricsOutcome {
+    /// The option is off.
+    Off,
+    /// A `.lrc` with timestamps was written.
+    Synced,
+    /// A `.lrc` with the text only was written (LRCLIB had no timing).
+    Plain,
+    /// LRCLIB has no lyrics for the track, or it is an instrumental.
+    NotFound,
+    /// The lookup or the file failed; the track itself is saved.
+    Failed(String),
+}
+
+/// Looks the track up on LRCLIB and writes `<file>.lrc` next to `audio`.
+/// Best effort: a failure is reported, the track stays as it is.
+fn write_lyrics(
+    client: &LyricsClient,
+    track: &Track,
+    album: Option<&str>,
+    recorded: Duration,
+    audio: &std::path::Path,
+) -> LyricsOutcome {
+    // LRCLIB lists the main artist; Spotify all of them (`A, B`).
+    let artist = track.title.artist.split(", ").next().unwrap_or_default();
+    let query = LyricsQuery {
+        artist,
+        title: &track.title.title,
+        album,
+        duration: track.details.duration.unwrap_or(recorded),
+    };
+    let lyrics = match client.find(&query) {
+        Ok(Some(lyrics)) => lyrics,
+        Ok(None) => return LyricsOutcome::NotFound,
+        Err(e) => {
+            tracing::warn!("{}: lyrics: {e}", track.title);
+            return LyricsOutcome::Failed(e);
+        }
+    };
+    if let Err(e) = std::fs::write(audio.with_extension("lrc"), lyrics.text()) {
+        tracing::warn!("{}: lyrics not written: {e}", track.title);
+        return LyricsOutcome::Failed(e.to_string());
+    }
+    match lyrics {
+        Lyrics::Synced(_) => LyricsOutcome::Synced,
+        Lyrics::Plain(_) => LyricsOutcome::Plain,
+    }
 }

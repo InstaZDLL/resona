@@ -39,5 +39,24 @@ fn main() -> anyhow::Result<()> {
     let cli = resona_core::spotify::cli::SpotifyCli::find().ok();
     let (tags, outcome) = tags_for(Some(&DeezerClient::new()?), cli.as_ref(), &track, uri);
     println!("{outcome:?}\n{tags:#?}");
+    let query = resona_core::metadata::lyrics::LyricsQuery {
+        artist: track.title.artist.split(", ").next().unwrap_or_default(),
+        title: &track.title.title,
+        album: tags.album.as_deref(),
+        duration: track.details.duration.unwrap_or_default(),
+    };
+    match resona_core::metadata::lyrics::LyricsClient::new()?.find(&query) {
+        Ok(Some(lyrics)) => println!(
+            "lyrics: {}",
+            lyrics
+                .text()
+                .lines()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ),
+        Ok(None) => println!("lyrics: none"),
+        Err(e) => println!("lyrics: {e}"),
+    }
     Ok(())
 }
