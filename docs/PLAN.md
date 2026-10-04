@@ -196,6 +196,11 @@ On colle un lien de playlist, d'album ou de morceau ; l'appli enregistre toute l
 - Interface : champ de lien, liste affichée d'avance (○ en attente), en-tête « nom · fait / total », lien « Réessayer les N manquants ». Exemple `record_playlist <lien>`.
 - Mesuré sur « BEST JP » (privée, 5 morceaux en 16 bits, par le câble) : 5 / 5 enregistrés, pause à l'arrivée de la lecture automatique. 阿修羅ちゃん bit-perfect 16 bits ; ダンスホール et Hi-Five crêtes limitées ; Flow et ヨワネハキ légèrement modifiés (proche de la grille 24 bits) alors qu'ils sont en 16 bits : traitement de Spotify lui-même, la même session ayant donné un bit-perfect. Clip vidéo écarté (lecture audio par défaut). L'étiquette « quasi sans perte, 24 bits » devient « légèrement modifié par Spotify ».
 
+### Réglages de Spotify et tags exacts (4 octobre 2026)
+
+- `spotify::prefs` lit le fichier `prefs` du compte utilisé en dernier (build Store et installateur classique) : `audio.normalize_v2`, `audio.automix` (absents = activés par défaut), `audio.play_bitrate_enumeration` (5 = Lossless). Alertes au lancement et à chaque début d'enregistrement. Le fondu enchaîné est stocké chez Spotify (`audio.crossfade_migrated_to_ps`) : seule la détection après coup le voit.
+- `metadata::spotify` : tags tirés du catalogue de Spotify par `spotify_cli lookup`, pour la version réellement jouée. Le moteur suit `now-playing` toutes les 2 s (`PlayingWatch`) et donne à chaque enregistrement l'identifiant exact ; la recherche ne sert qu'en secours (elle ne trouve pas toujours la version jouée : 阿修羅ちゃん de l'album 狂言 absent des résultats). Album au nom de SMTC (la CLI romanise : « Kyougen »), artistes de l'album, date, copyright (`COPYRIGHT`, `TCOP`), pochette 640 px, position sur l'album (par identifiant, titre, puis durée unique). Deezer complète genres, ISRC et label. `TagsOutcome { spotify, deezer }`.
+
 ### Phase 6 — Distribution
 
 - CI GitHub Actions sur `windows-latest` : `cargo fmt --check`, `clippy -D warnings`, `cargo test`.

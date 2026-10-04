@@ -1,33 +1,89 @@
 //! Tags for recorded tracks: Spotify's own details (window title, SMTC),
-//! completed from Deezer's public catalogue when a hit agrees on every
-//! signal ([`lookup`]).
+//! made exact from Spotify's catalogue ([`spotify`], the release actually
+//! played) and completed from Deezer's public catalogue when a hit agrees
+//! on every signal ([`lookup`]).
 
 pub mod deezer;
 pub mod lookup;
 pub mod name_match;
+pub mod spotify;
 pub mod tags;
 
 use deezer::DeezerClient;
 use lookup::Query;
 use tags::{Cover, TrackTags};
 
+use crate::spotify::cli::SpotifyCli;
 use crate::spotify::state::Track;
 
 /// How the tags of a track were obtained.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TagsOutcome {
-    /// Completed from Deezer, cover included when it had one.
-    Deezer,
-    /// Deezer has no hit that agrees: Spotify's details only.
+pub struct TagsOutcome {
+    /// Spotify's catalogue knew the release played.
+    pub spotify: bool,
+    pub deezer: DeezerOutcome,
+}
+
+impl TagsOutcome {
+    /// More than the window title and SMTC went into the tags.
+    pub fn is_complete(&self) -> bool {
+        self.spotify || self.deezer == DeezerOutcome::Matched
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeezerOutcome {
+    /// Completed from Deezer.
+    Matched,
+    /// Deezer has no hit that agrees.
     NoMatch,
-    /// Deezer could not be reached or refused: Spotify's details only.
+    /// Deezer could not be reached or refused.
     Unavailable(String),
 }
 
-/// Spotify's details, completed from Deezer when possible. Never fails:
-/// a lookup problem leaves the Spotify tags and says why.
-pub fn tags_for(client: &DeezerClient, track: &Track) -> (TrackTags, TagsOutcome) {
+/// Spotify's details, completed from Deezer, then made exact from
+/// Spotify's catalogue (`uri`: the entry played, when known). Never fails: a lookup problem leaves the tags it
+/// could not fill and says why.
+pub fn tags_for(
+    deezer: Option<&DeezerClient>,
+    spotify: Option<&SpotifyCli>,
+    track: &Track,
+    uri: Option<&str>,
+) -> (TrackTags, TagsOutcome) {
     let mut tags = TrackTags::from_spotify(track);
+    let deezer_outcome = match deezer {
+        Some(client) => from_deezer(client, track, &mut tags),
+        None => DeezerOutcome::Unavailable("no HTTP client".into()),
+    };
+    let details = spotify.and_then(|cli| {
+        spotify::find(cli, track, uri)
+            .inspect_err(|e| tracing::warn!("spotify catalogue: {e}"))
+            .ok()
+            .flatten()
+    });
+    if let Some(details) = &details {
+        tags.merge_spotify(details);
+        // Spotify's cover is the one of the release played.
+        if let (Some(url), Some(client)) = (&details.cover_url, deezer)
+            && let Some(cover) = client
+                .image(url)
+                .inspect_err(|e| tracing::warn!("cover {url}: {e}"))
+                .ok()
+                .and_then(Cover::from_bytes)
+        {
+            tags.cover = Some(cover);
+        }
+    }
+    (
+        tags,
+        TagsOutcome {
+            spotify: details.is_some(),
+            deezer: deezer_outcome,
+        },
+    )
+}
+
+fn from_deezer(client: &DeezerClient, track: &Track, tags: &mut TrackTags) -> DeezerOutcome {
     let title = track.title.full_title();
     let query = Query {
         artist: &track.title.artist,
@@ -35,7 +91,7 @@ pub fn tags_for(client: &DeezerClient, track: &Track) -> (TrackTags, TagsOutcome
         album: track.details.album.as_deref(),
         duration: track.details.duration,
     };
-    let outcome = (|| -> deezer::DeezerResult<TagsOutcome> {
+    (|| -> deezer::DeezerResult<DeezerOutcome> {
         // The full title first; Deezer sometimes lists the version only
         // in the album, so the bare title is tried next.
         let mut hits = client.search_track(query.artist, query.title)?;
@@ -43,7 +99,7 @@ pub fn tags_for(client: &DeezerClient, track: &Track) -> (TrackTags, TagsOutcome
             hits = client.search_track(query.artist, &track.title.title)?;
         }
         let Some(hit) = lookup::best_hit(&query, &hits) else {
-            return Ok(TagsOutcome::NoMatch);
+            return Ok(DeezerOutcome::NoMatch);
         };
         let deezer_track = client.track(hit.id)?;
         let album = match deezer_track.album.as_ref() {
@@ -61,8 +117,7 @@ pub fn tags_for(client: &DeezerClient, track: &Track) -> (TrackTags, TagsOutcome
                 .ok()
                 .and_then(Cover::from_bytes);
         }
-        Ok(TagsOutcome::Deezer)
+        Ok(DeezerOutcome::Matched)
     })()
-    .unwrap_or_else(|e| TagsOutcome::Unavailable(e.to_string()));
-    (tags, outcome)
+    .unwrap_or_else(|e| DeezerOutcome::Unavailable(e.to_string()))
 }

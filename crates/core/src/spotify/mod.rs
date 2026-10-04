@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod link;
+pub mod prefs;
 pub mod state;
 pub mod title;
 

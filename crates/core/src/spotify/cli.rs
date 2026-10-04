@@ -69,12 +69,29 @@ pub struct NowPlaying {
     pub is_playing: bool,
 }
 
-/// What `lookup` tells about a track.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What `lookup` tells about a track or an album.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrackInfo {
     pub name: String,
     pub artists: Vec<String>,
     pub duration: Option<Duration>,
+    /// A track's album: `(name, uri)`.
+    pub album: Option<(String, String)>,
+    /// `2022-7-27` as Spotify writes it.
+    pub release_date: Option<String>,
+    /// Albums only.
+    pub copyright: Option<String>,
+    /// The 64 px cover.
+    pub image_url: Option<String>,
+}
+
+/// A track `search` found.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SearchHit {
+    pub uri: String,
+    pub name: String,
+    #[serde(default)]
+    pub artists: Vec<String>,
 }
 
 pub struct SpotifyCli {
@@ -138,16 +155,34 @@ impl SpotifyCli {
         self.run(&["volume", &format!("{level:.2}")]).map(drop)
     }
 
+    /// The volume of this computer's Spotify, in percent.
+    pub fn local_volume(&self) -> Result<Option<u8>> {
+        parse_local_volume(&self.run(&["devices", "list"])?)
+    }
+
     /// Name, artists and duration of tracks, for the URIs Spotify knows.
     pub fn lookup(&self, uris: &[String]) -> Result<HashMap<String, TrackInfo>> {
         let mut found = HashMap::new();
         for batch in uris.chunks(LOOKUP_BATCH) {
             let mut args = vec!["lookup"];
             args.extend(batch.iter().map(String::as_str));
-            args.extend(["--fields", "duration"]);
+            args.extend(["--fields", "duration,release_date,copyright"]);
             found.extend(parse_lookup(&self.run(&args)?)?);
         }
         Ok(found)
+    }
+
+    /// Tracks of the catalogue matching `query`, best first.
+    pub fn search_tracks(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
+        #[derive(Deserialize)]
+        struct Answer {
+            #[serde(default)]
+            tracks: Vec<SearchHit>,
+        }
+        let limit = limit.to_string();
+        let answer: Answer =
+            parse(&self.run(&["search", query, "--type", "track", "--limit", &limit])?)?;
+        Ok(answer.tracks)
     }
 
     /// Runs one command, without a console window, and returns its JSON.
@@ -207,6 +242,25 @@ fn parse_now_playing(json: &str) -> Result<Option<NowPlaying>> {
         .filter(|now| !now.uri.is_empty()))
 }
 
+fn parse_local_volume(json: &str) -> Result<Option<u8>> {
+    #[derive(Deserialize)]
+    struct Answer {
+        #[serde(default)]
+        devices: Vec<Device>,
+    }
+    #[derive(Deserialize)]
+    struct Device {
+        #[serde(default)]
+        is_self: bool,
+        volume: Option<u8>,
+    }
+    Ok(parse::<Answer>(json)?
+        .devices
+        .into_iter()
+        .find(|d| d.is_self)
+        .and_then(|d| d.volume))
+}
+
 fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
     #[derive(Deserialize)]
     struct Answer {
@@ -220,12 +274,16 @@ fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
         name: String,
         #[serde(default)]
         contributors: Vec<Named>,
+        parent: Option<Named>,
+        image_url: Option<String>,
         #[serde(default)]
         metadata: Vec<Field>,
     }
     #[derive(Deserialize)]
     struct Named {
         name: String,
+        #[serde(default)]
+        uri: String,
     }
     #[derive(Deserialize)]
     struct Field {
@@ -236,16 +294,23 @@ fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
         .entities
         .into_iter()
         .map(|entity| {
-            let duration = entity
-                .metadata
-                .iter()
-                .find(|f| f.field == "duration")
-                .and_then(|f| f.value.parse().ok())
-                .map(Duration::from_millis);
+            let field = |name: &str| {
+                entity
+                    .metadata
+                    .iter()
+                    .find(|f| f.field == name)
+                    .map(|f| f.value.clone())
+            };
             let info = TrackInfo {
+                duration: field("duration")
+                    .and_then(|ms| ms.parse().ok())
+                    .map(Duration::from_millis),
+                release_date: field("release_date"),
+                copyright: field("copyright"),
                 name: entity.name,
                 artists: entity.contributors.into_iter().map(|c| c.name).collect(),
-                duration,
+                album: entity.parent.map(|p| (p.name, p.uri)),
+                image_url: entity.image_url,
             };
             (entity.uri, info)
         })
@@ -290,7 +355,42 @@ mod tests {
         assert_eq!(flow.name, "Flow");
         assert_eq!(flow.artists, ["Perfume"]);
         assert_eq!(flow.duration, Some(Duration::from_secs(184)));
+        assert_eq!(
+            flow.album,
+            Some((
+                "PLASMA".into(),
+                "spotify:album:4gqRmcXiuzlxB9nEnFiK4y".into()
+            ))
+        );
         assert_eq!(found["spotify:track:x"].duration, None);
+    }
+
+    #[test]
+    fn reads_an_album_lookup() {
+        let json = r#"{"entities":[{"uri":"spotify:album:4gqRmcXiuzlxB9nEnFiK4y","type":"Album","name":"PLASMA","contributors":[{"name":"Perfume","uri":"spotify:artist:2XMxWKPKCxoLkSdpCViCnr"}],"image_url":"https://i.scdn.co/image/ab67616d000048518f08f8275990d14cec9894b2","metadata":[{"field":"duration","value":"2808000"},{"field":"release_date","value":"2022-7-27"},{"field":"copyright","value":"A UNIVERSAL J / Perfume Records release | © 2022 UNIVERSAL MUSIC LLC | ℗ 2022 UNIVERSAL MUSIC LLC"},{"field":"spotify_release_date","value":"1658833200"}]}]}"#;
+        let album = &parse_lookup(json).unwrap()["spotify:album:4gqRmcXiuzlxB9nEnFiK4y"];
+        assert_eq!(album.release_date.as_deref(), Some("2022-7-27"));
+        assert!(album.copyright.as_deref().unwrap().contains("UNIVERSAL"));
+        assert!(album.image_url.as_deref().unwrap().ends_with("cec9894b2"));
+    }
+
+    #[test]
+    fn reads_search_hits() {
+        #[derive(Deserialize)]
+        struct Answer {
+            tracks: Vec<SearchHit>,
+        }
+        let json = r#"{"artists":[],"tracks":[{"uri":"spotify:track:55HzAX2f4rVNpJ0XzyNHkP","name":"Flow","artists":["Perfume"],"image":"spotify:image:ab67616d00004851dcf8101b009869dc33d030db"},{"uri":"spotify:track:6Si3ppdntTNAEaBUokB4Yv","name":"Flow","artists":["Perfume"],"image":"spotify:image:ab67616d000048518f08f8275990d14cec9894b2"}],"albums":[]}"#;
+        let answer: Answer = parse(json).unwrap();
+        assert_eq!(answer.tracks.len(), 2);
+        assert_eq!(answer.tracks[1].uri, "spotify:track:6Si3ppdntTNAEaBUokB4Yv");
+    }
+
+    #[test]
+    fn reads_the_local_volume() {
+        let json = r#"{"active_device_id":"fe73","devices":[{"device_id":"aa","name":"Phone","volume":100,"is_self":false},{"device_id":"fe73","name":"COMMANDO1433","device_type":"computer","volume":54,"is_active":true,"is_group":false,"is_local":true,"is_self":true,"capabilities":{"volume_steps":64}}]}"#;
+        assert_eq!(parse_local_volume(json).unwrap(), Some(54));
+        assert_eq!(parse_local_volume(r#"{"devices":[]}"#).unwrap(), None);
     }
 
     #[test]

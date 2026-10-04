@@ -9,6 +9,7 @@ use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagExt, TagItem, TagType};
 
 use super::deezer;
+use super::spotify::SpotifyDetails;
 use crate::format::OutputFormat;
 use crate::spotify::state::Track;
 
@@ -27,6 +28,7 @@ pub struct TrackTags {
     pub genres: Vec<String>,
     pub isrc: Option<String>,
     pub label: Option<String>,
+    pub copyright: Option<String>,
     pub cover: Option<Cover>,
     /// The catalogue the details come from, when not only Spotify.
     pub source: Option<&'static str>,
@@ -102,6 +104,32 @@ impl TrackTags {
         self.source = Some("Deezer");
     }
 
+    /// Makes the tags exact from Spotify's catalogue: the release played
+    /// (album, its artists, date, copyright). Deezer may have matched the
+    /// same song on another release; when the album differs, its position
+    /// on the album is Spotify's too. Genres, ISRC and label stay Deezer's.
+    pub fn merge_spotify(&mut self, details: &SpotifyDetails) {
+        let other_release = self.album.as_deref() != Some(details.album.as_str());
+        self.album = Some(details.album.clone());
+        if !details.album_artists.is_empty() {
+            self.album_artist = Some(details.album_artists.join(", "));
+        }
+        if details.date.is_some() {
+            self.date = details.date.clone();
+        }
+        if details.copyright.is_some() {
+            self.copyright = details.copyright.clone();
+        }
+        if (other_release || self.track_number.is_none()) && details.track_number.is_some() {
+            self.track_number = details.track_number;
+            self.track_total = details.track_total;
+            if other_release {
+                self.disc_number = None;
+            }
+        }
+        self.source = Some("Spotify");
+    }
+
     /// The largest cover Deezer offers for this track's album.
     pub fn cover_url(track: &deezer::Track, album: Option<&deezer::Album>) -> Option<String> {
         album
@@ -130,6 +158,7 @@ impl TrackTags {
         put("DATE", &self.date);
         put("ISRC", &self.isrc);
         put("ORGANIZATION", &self.label);
+        put("COPYRIGHT", &self.copyright);
         put("TRACKNUMBER", &self.track_number.map(|n| n.to_string()));
         put("TRACKTOTAL", &self.track_total.map(|n| n.to_string()));
         put("DISCNUMBER", &self.disc_number.map(|n| n.to_string()));
@@ -189,6 +218,7 @@ impl TrackTags {
         put(ItemKey::RecordingDate, self.date.clone());
         put(ItemKey::Isrc, self.isrc.clone());
         put(ItemKey::Label, self.label.clone());
+        put(ItemKey::CopyrightMessage, self.copyright.clone());
         put(
             ItemKey::TrackNumber,
             self.track_number.map(|n| n.to_string()),

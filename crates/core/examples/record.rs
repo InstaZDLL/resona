@@ -85,7 +85,6 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
 
     use spytify_core::analysis::Fidelity;
     use spytify_core::audio_setup::SetupIssue;
-    use spytify_core::metadata::TagsOutcome;
     use spytify_core::recorder::engine::RecorderEvent;
     use spytify_core::spotify::state::Event;
 
@@ -162,11 +161,7 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
             "✔ saved      {title}  [{}, {}, tags: {}]  → {}",
             length(duration),
             quality(fidelity),
-            match tags {
-                TagsOutcome::Deezer => "Deezer".to_string(),
-                TagsOutcome::NoMatch => "Spotify only (no Deezer match)".to_string(),
-                TagsOutcome::Unavailable(why) => format!("Spotify only ({why})"),
-            },
+            describe_tags(&tags),
             path.display()
         ),
         RecorderEvent::Discarded {
@@ -190,4 +185,19 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
 #[cfg(not(windows))]
 fn main() {
     eprintln!("record needs Windows.");
+}
+
+#[cfg(windows)]
+fn describe_tags(outcome: &spytify_core::metadata::TagsOutcome) -> String {
+    use spytify_core::metadata::DeezerOutcome;
+    let deezer = match &outcome.deezer {
+        DeezerOutcome::Matched => "Deezer".to_owned(),
+        DeezerOutcome::NoMatch => "no Deezer match".to_owned(),
+        DeezerOutcome::Unavailable(why) => format!("Deezer unavailable ({why})"),
+    };
+    if outcome.spotify {
+        format!("Spotify catalogue + {deezer}")
+    } else {
+        deezer
+    }
 }
