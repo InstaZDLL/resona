@@ -9,10 +9,10 @@ use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::Media::Audio::ENDPOINT_SYSFX_DISABLED;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
-    IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, ISimpleAudioVolume,
-    MMDeviceEnumerator, eConsole, eRender,
+    IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
+    ISimpleAudioVolume, MMDeviceEnumerator,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
 };
@@ -23,6 +23,8 @@ use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
 
 #[derive(Debug, Clone)]
 pub struct OutputDevice {
+    /// Endpoint id (`{0.0.0.00000000}.{guid}`).
+    pub id: String,
     pub name: String,
     pub sample_rate: u32,
     pub bits_per_sample: u16,
@@ -91,25 +93,90 @@ pub struct SessionVolume {
 /// Default render device and its shared-mode mix format. Needs COM (MTA).
 pub fn default_output_device() -> Result<OutputDevice> {
     let device = DeviceEnumerator::new()?.get_default_device(&Direction::Render)?;
+    output_device(&device.get_id()?)
+}
+
+/// The device Spotify (root process `pid`) plays on: the one chosen for it
+/// in the Windows volume mixer, else the default device. Needs COM (MTA).
+pub fn spotify_output_device(pid: u32) -> Result<OutputDevice> {
+    let routed = crate::routing::spotify_endpoint(pid).unwrap_or_else(|e| {
+        tracing::warn!("cannot read Spotify's output device: {e}");
+        None
+    });
+    match routed {
+        // A device chosen once and unplugged since: Windows falls back to
+        // the default one.
+        Some(id) => output_device(&id).or_else(|_| default_output_device()),
+        None => default_output_device(),
+    }
+}
+
+/// Active render devices, as `(id, name)`. Needs COM (MTA).
+pub fn render_devices() -> Result<Vec<(String, String)>> {
+    let devices = DeviceEnumerator::new()?.get_device_collection(&Direction::Render)?;
+    let mut list = Vec::new();
+    for index in 0..devices.get_nbr_devices()? {
+        let device = devices.get_device_at_index(index)?;
+        list.push((device.get_id()?, device.get_friendlyname()?));
+    }
+    Ok(list)
+}
+
+/// The playback side of an installed virtual audio cable (VB-Audio's
+/// "CABLE Input"), as `(id, name)`. Needs COM (MTA).
+pub fn virtual_cable() -> Result<Option<(String, String)>> {
+    Ok(render_devices()?
+        .into_iter()
+        .find(|(_, name)| is_virtual_cable(name)))
+}
+
+fn is_virtual_cable(name: &str) -> bool {
+    let name = name.to_lowercase();
+    name.contains("cable input") || name.contains("virtual audio cable")
+}
+
+/// Devices nobody listens on: virtual cables (VB-Audio installs several)
+/// and Steam's streaming endpoints.
+fn is_virtual(name: &str) -> bool {
+    let name = name.to_lowercase();
+    is_virtual_cable(&name) || name.contains("vb-audio") || name.contains("steam streaming")
+}
+
+/// The Windows default output device is a virtual cable, so nothing is
+/// heard (VB-Cable's installer does that).
+#[derive(Debug, Clone)]
+pub struct CableAsDefault {
+    /// A real device to go back to, as `(id, name)`.
+    pub replacement: Option<(String, String)>,
+}
+
+/// `Some` when the Windows default output device is a virtual cable.
+/// Needs COM (MTA).
+pub fn cable_as_default() -> Result<Option<CableAsDefault>> {
+    let default = DeviceEnumerator::new()?.get_default_device(&Direction::Render)?;
+    if !is_virtual(&default.get_friendlyname()?) {
+        return Ok(None);
+    }
+    let replacement = render_devices()?
+        .into_iter()
+        .find(|(_, name)| !is_virtual(name));
+    Ok(Some(CableAsDefault { replacement }))
+}
+
+/// The render device `id` and its shared-mode mix format. Needs COM (MTA).
+pub fn output_device(id: &str) -> Result<OutputDevice> {
+    let device = DeviceEnumerator::new()?.get_device(id)?;
     let format = device.get_iaudioclient()?.get_mixformat()?;
-    let (volume_db, volume_scalar, muted, enhancements) = unsafe {
-        let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let endpoint_device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
-        let endpoint: IAudioEndpointVolume = endpoint_device.Activate(CLSCTX_ALL, None)?;
+    let (volume_db, volume_scalar, muted) = unsafe {
+        let endpoint: IAudioEndpointVolume = immdevice(id)?.Activate(CLSCTX_ALL, None)?;
         (
             endpoint.GetMasterVolumeLevel()?,
             endpoint.GetMasterVolumeLevelScalar()?,
             endpoint.GetMute()?.as_bool(),
-            {
-                let id = endpoint_device.GetId()?;
-                let text = id.to_string();
-                CoTaskMemFree(Some(id.0.cast()));
-                text.ok().and_then(|id| enhancements_active(&id))
-            },
         )
     };
     Ok(OutputDevice {
+        id: id.to_owned(),
         name: device.get_friendlyname()?,
         sample_rate: format.get_samplespersec(),
         bits_per_sample: format.get_validbitspersample(),
@@ -118,8 +185,16 @@ pub fn default_output_device() -> Result<OutputDevice> {
         volume_db,
         volume_scalar,
         muted,
-        enhancements,
+        enhancements: enhancements_active(id),
     })
+}
+
+fn immdevice(id: &str) -> windows::core::Result<IMMDevice> {
+    unsafe {
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        enumerator.GetDevice(&HSTRING::from(id))
+    }
 }
 
 /// Whether Windows "Audio enhancements" process this device's streams.
@@ -181,16 +256,25 @@ fn enhancements_active(device_id: &str) -> Option<bool> {
 }
 
 /// Calls `visit` with the volume control of every audio session owned by
-/// `pids` on the default render device. Needs COM (MTA).
+/// `pids`, on every render device (Spotify may be routed to any). Needs
+/// COM (MTA).
 fn for_each_session(
     pids: &HashSet<u32>,
     mut visit: impl FnMut(u32, &ISimpleAudioVolume) -> windows::core::Result<()>,
 ) -> Result<()> {
+    for (id, _) in render_devices()? {
+        visit_sessions(&id, pids, &mut visit)?;
+    }
+    Ok(())
+}
+
+fn visit_sessions(
+    device_id: &str,
+    pids: &HashSet<u32>,
+    visit: &mut impl FnMut(u32, &ISimpleAudioVolume) -> windows::core::Result<()>,
+) -> Result<()> {
     unsafe {
-        let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
-        let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;
+        let manager: IAudioSessionManager2 = immdevice(device_id)?.Activate(CLSCTX_ALL, None)?;
         let sessions = manager.GetSessionEnumerator()?;
         for index in 0..sessions.GetCount()? {
             let control = sessions.GetSession(index)?;
@@ -229,4 +313,27 @@ pub fn set_spotify_muted(pids: &HashSet<u32>, muted: bool) -> Result<()> {
     for_each_session(pids, |_, volume| unsafe {
         volume.SetMute(muted, std::ptr::null())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_vb_cable() {
+        assert!(is_virtual_cable("CABLE Input (VB-Audio Virtual Cable)"));
+        assert!(!is_virtual_cable(
+            "Haut-parleurs (PRO X Wireless Gaming Headset)"
+        ));
+        assert!(!is_virtual_cable("CABLE In 16ch (VB-Audio Virtual Cable)"));
+    }
+
+    #[test]
+    fn tells_virtual_devices_from_real_ones() {
+        assert!(is_virtual("CABLE In 16ch (VB-Audio Virtual Cable)"));
+        assert!(is_virtual("Speakers (Steam Streaming Speakers)"));
+        assert!(!is_virtual(
+            "Speakers (Logitech PRO X Wireless Gaming Headset)"
+        ));
+    }
 }

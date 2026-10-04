@@ -36,4 +36,12 @@ pub enum Error {
 
     #[error("capture thread stopped unexpectedly")]
     CaptureThread,
+
+    #[error("playback thread stopped unexpectedly")]
+    PlaybackThread,
+
+    #[error(
+        "the default device is the one Spotify is captured from: playing back there would loop"
+    )]
+    PlaybackLoop,
 }

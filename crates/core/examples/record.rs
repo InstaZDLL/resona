@@ -2,7 +2,7 @@
 //! settings (`%APPDATA%\Spytify\settings.toml`), overridden by the flags.
 //!
 //! ```text
-//! cargo run -p spytify-core --example record -- [output dir] [minutes] [--keep-partial]
+//! cargo run -p spytify-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable]
 //!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
@@ -20,6 +20,12 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut settings = Settings::load();
     settings.min_duration_secs = 10;
+    if args.iter().any(|a| a == "--no-cable") {
+        settings.virtual_cable = false;
+    }
+    if args.iter().any(|a| a == "--cable") {
+        settings.virtual_cable = true;
+    }
     if args.iter().any(|a| a == "--keep-partial") {
         settings.keep_partial = true;
     }
@@ -107,6 +113,15 @@ fn print_event(event: spytify_core::recorder::engine::RecorderEvent) {
             }
         }
         RecorderEvent::CaptureLost => println!("capture lost, retrying…"),
+        RecorderEvent::CableIsDefault(_) => {
+            println!("  ⚠ the virtual cable is the Windows default device: nothing is heard")
+        }
+        RecorderEvent::SpotifyFades(title) => {
+            println!("  ⚠ {title} starts with a fade Spotify added: turn crossfade and Automix off")
+        }
+        RecorderEvent::CableMissing => {
+            println!("  ⚠ no virtual cable installed: Spotify stays on its device")
+        }
         RecorderEvent::Recording(title) => println!("● recording  {title}"),
         RecorderEvent::AlreadyRecorded {
             title,

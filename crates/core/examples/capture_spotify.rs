@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
 
     let _ = wasapi::initialize_mta();
     let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
-    let device = audio_setup::default_output_device()?;
+    let device = audio_setup::spotify_output_device(processes.root)?;
     println!(
         "output device: {} — {} Hz, {} bits, {} channels (mask {:#x}){}, volume {:.0} % ({:.1} dB){}{}{}",
         device.name,

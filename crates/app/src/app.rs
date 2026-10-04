@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use spytify_core::analysis::Fidelity;
-use spytify_core::audio_setup::SetupIssue;
+use spytify_core::audio_setup::{CableAsDefault, SetupIssue};
 use spytify_core::metadata::TagsOutcome;
 use spytify_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
 use spytify_core::settings::Settings;
@@ -95,6 +95,7 @@ pub fn run() -> anyhow::Result<()> {
                 Err(e) => notices.push(Notice {
                     kind: Warning::Error,
                     detail: e.to_string().into(),
+                    ..Notice::default()
                 }),
             }
         }
@@ -162,6 +163,61 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
 
+    window.on_open_cable_site(|| {
+        let _ = std::process::Command::new("explorer")
+            .arg("https://vb-audio.com/Cable/")
+            .spawn();
+    });
+
+    // Looked up off the UI thread, which is not in COM's MTA.
+    {
+        let weak = window.as_weak();
+        thread::spawn(move || {
+            let _ = wasapi::initialize_mta();
+            let cable = spytify_core::audio_setup::virtual_cable()
+                .ok()
+                .flatten()
+                .map(|(_, name)| name)
+                .unwrap_or_default();
+            let as_default = spytify_core::audio_setup::cable_as_default().ok().flatten();
+            let _ = weak.upgrade_in_event_loop(move |w| {
+                w.set_cable_name(cable.into());
+                if let Some(as_default) = as_default {
+                    show_cable_as_default(&w, &as_default);
+                }
+            });
+        });
+    }
+
+    window.on_restore_default_device({
+        let weak = window.as_weak();
+        move |id| {
+            let weak = weak.clone();
+            thread::spawn(move || {
+                let _ = wasapi::initialize_mta();
+                let result = spytify_core::device_config::set_default_device(&id);
+                let _ = weak.upgrade_in_event_loop(move |w| {
+                    let notices = w.get_notices();
+                    let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
+                        return;
+                    };
+                    let mut kept: Vec<Notice> = notices
+                        .iter()
+                        .filter(|n| n.kind != Warning::CableDefault)
+                        .collect();
+                    if let Err(e) = result {
+                        kept.push(Notice {
+                            kind: Warning::Error,
+                            detail: e.to_string().into(),
+                            ..Notice::default()
+                        });
+                    }
+                    notices.set_vec(kept);
+                });
+            });
+        }
+    });
+
     window.run()?;
 
     // Closing the window while recording keeps what was recorded.
@@ -195,6 +251,8 @@ fn show_settings(window: &AppWindow, settings: &Settings) {
     window.set_existing_index(index_of(&mapping::EXISTING, &settings.existing));
     window.set_skip_in_spotify(settings.skip_existing_in_spotify);
     window.set_mute_ads(settings.mute_ads);
+    window.set_virtual_cable(settings.virtual_cable);
+    window.set_listen(settings.listen);
     window.set_language_index(index_of(&mapping::LANGUAGES, &settings.language));
 }
 
@@ -208,6 +266,8 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
     settings.existing = at(&mapping::EXISTING, window.get_existing_index());
     settings.skip_existing_in_spotify = window.get_skip_in_spotify();
     settings.mute_ads = window.get_mute_ads();
+    settings.virtual_cable = window.get_virtual_cable();
+    settings.listen = window.get_listen();
 }
 
 /// Hands every event of `events` to `handle` on the UI thread, until the
@@ -290,19 +350,28 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
     };
     match event {
         RecorderEvent::CaptureStarted { device, .. } => {
-            notices.set_vec(Vec::new());
+            // The device may have changed since the last capture (Spotify
+            // moved to the cable): its warnings are redone, others kept.
+            let mut kept: Vec<Notice> = notices
+                .iter()
+                .filter(|n| !matches!(n.kind, Warning::Enhancements | Warning::SampleRate))
+                .collect();
+            let name: SharedString = device.name.as_str().into();
             for issue in device.lossless_issues() {
-                notices.push(match issue {
+                kept.push(match issue {
                     SetupIssue::Enhancements => Notice {
                         kind: Warning::Enhancements,
+                        device: name.clone(),
                         detail: SharedString::new(),
                     },
                     SetupIssue::SampleRate(rate) => Notice {
                         kind: Warning::SampleRate,
+                        device: name.clone(),
                         detail: rate.to_string().into(),
                     },
                 });
             }
+            notices.set_vec(kept);
         }
         RecorderEvent::Recording(title) => {
             tracks.push(row(&title, TrackState::Recording));
@@ -331,6 +400,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
                 notices.push(Notice {
                     kind: Warning::Processed,
                     detail: title.to_string().into(),
+                    ..Notice::default()
                 });
             }
         }
@@ -361,10 +431,44 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             notices.push(Notice {
                 kind: Warning::Error,
                 detail: message.into(),
+                ..Notice::default()
             });
         }
+        RecorderEvent::CableIsDefault(as_default) => show_cable_as_default(window, &as_default),
+        RecorderEvent::SpotifyFades(title) => {
+            // Once: the setting is the same for every track.
+            if !notices.iter().any(|n| n.kind == Warning::SpotifyFades) {
+                notices.push(Notice {
+                    kind: Warning::SpotifyFades,
+                    detail: title.to_string().into(),
+                    ..Notice::default()
+                });
+            }
+        }
+        RecorderEvent::CableMissing => notices.push(Notice {
+            kind: Warning::CableMissing,
+            ..Notice::default()
+        }),
         RecorderEvent::CaptureLost | RecorderEvent::AdMuted(_) | RecorderEvent::Spotify(_) => {}
     }
+}
+
+/// Warns that nothing can be heard, with a button to go back to a real
+/// device. Shown once.
+fn show_cable_as_default(window: &AppWindow, as_default: &CableAsDefault) {
+    let notices = window.get_notices();
+    let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
+        return;
+    };
+    if notices.iter().any(|n| n.kind == Warning::CableDefault) {
+        return;
+    }
+    let (id, name) = as_default.replacement.clone().unwrap_or_default();
+    notices.push(Notice {
+        kind: Warning::CableDefault,
+        device: name.into(),
+        detail: id.into(),
+    });
 }
 
 fn row(title: &TrackTitle, state: TrackState) -> TrackRow {

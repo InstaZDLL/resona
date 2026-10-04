@@ -25,6 +25,11 @@ pub struct Settings {
     pub existing: ExistingTracks,
     pub skip_existing_in_spotify: bool,
     pub mute_ads: bool,
+    /// Send Spotify to a virtual audio cable while recording (see
+    /// `RecorderConfig::virtual_cable`).
+    pub virtual_cable: bool,
+    /// Hear Spotify while it plays into the cable.
+    pub listen: bool,
     pub language: Language,
 }
 
@@ -70,6 +75,8 @@ impl Default for Settings {
             existing: ExistingTracks::Skip,
             skip_existing_in_spotify: false,
             mute_ads: true,
+            virtual_cable: false,
+            listen: false,
             language: Language::Fr,
         }
     }
@@ -128,6 +135,8 @@ impl Settings {
             existing: self.existing,
             skip_existing_in_spotify: self.skip_existing_in_spotify,
             mute_ads: self.mute_ads,
+            virtual_cable: self.virtual_cable,
+            listen: self.listen,
         }
     }
 

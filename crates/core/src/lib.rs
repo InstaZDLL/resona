@@ -16,5 +16,11 @@ pub mod spotify;
 pub mod audio_setup;
 #[cfg(windows)]
 pub mod capture;
+#[cfg(windows)]
+pub mod device_config;
+#[cfg(windows)]
+pub mod playback;
+#[cfg(windows)]
+pub mod routing;
 
 pub use error::{Error, Result};

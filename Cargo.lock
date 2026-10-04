@@ -4446,6 +4446,7 @@ dependencies = [
  "spytify-core",
  "tracing",
  "tracing-subscriber",
+ "wasapi",
 ]
 
 [[package]]
@@ -4469,6 +4470,7 @@ dependencies = [
  "tracing-subscriber",
  "wasapi",
  "windows",
+ "windows-core",
 ]
 
 [[package]]

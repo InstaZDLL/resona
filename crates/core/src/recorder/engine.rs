@@ -1,7 +1,7 @@
 //! The recording session: capture + monitor in, one FLAC per track out.
 //!
 //! Three threads besides the caller's: the capture thread (WASAPI), the
-//! monitor thread (Spotify state), and this engine's own, which owns the
+//! monitor thread (Spotiframe_at(started_at)y state), and this engine's own, which owns the
 //! [`Splitter`] and the temporary WAV of the track being recorded. Encoding
 //! runs on a fourth thread so a slow FLAC never holds up the capture.
 
@@ -18,14 +18,17 @@ use super::library::{ExistingTracks, Library};
 use super::naming::{self, Layout};
 use super::splitter::{Action, Change, Ended, Splitter};
 use crate::analysis::{BitAnalysis, Fidelity};
-use crate::audio_setup::{self, OutputDevice};
+use crate::audio_setup::{self, CableAsDefault, OutputDevice};
 use crate::capture::{CaptureConfig, Packet, ProcessCapture};
+use crate::device_config;
 use crate::encode::{Quantizer, flac, mp3, wav, wav::CaptureWav};
 use crate::format::CAPTURE_SAMPLE_RATE;
 use crate::format::OutputFormat;
 use crate::metadata::deezer::DeezerClient;
 use crate::metadata::tags::TrackTags;
 use crate::metadata::{self, TagsOutcome};
+use crate::playback::Playback;
+use crate::routing;
 use crate::spotify::monitor::{Monitor, MonitorEvent};
 use crate::spotify::process::SpotifyProcesses;
 use crate::spotify::smtc::Smtc;
@@ -62,16 +65,34 @@ pub struct RecorderConfig {
     pub skip_existing_in_spotify: bool,
     /// Mute Spotify in the Windows mixer while an ad plays (Free tier).
     pub mute_ads: bool,
+    /// Send Spotify to a virtual audio cable (VB-Cable) instead of the
+    /// headset or speakers, so their settings (rate, enhancements,
+    /// surround) no longer touch the recording. Off takes Spotify back
+    /// off the cable.
+    pub virtual_cable: bool,
+    /// With [`Self::virtual_cable`]: play what is recorded on the default
+    /// device, to hear Spotify. Off, Spotify is silent while recording.
+    pub listen: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum RecorderEvent {
     CaptureStarted {
         pid: u32,
-        /// The output device as found when the capture started, with
-        /// [`OutputDevice::lossless_issues`] to warn about.
+        /// The device Spotify plays on as found when the capture started,
+        /// with [`OutputDevice::lossless_issues`] to warn about.
         device: OutputDevice,
     },
+    /// [`RecorderConfig::virtual_cable`] is on but no cable is installed:
+    /// Spotify stays on its current device.
+    CableMissing,
+    /// The Windows default output device is the virtual cable: nothing is
+    /// heard (VB-Cable's installer does that).
+    CableIsDefault(CableAsDefault),
+    /// The track starts with a volume ramp Spotify added: crossfade or
+    /// Automix is on (Spotify updates have switched them back on). Its
+    /// start, and the end of the track before, are not lossless.
+    SpotifyFades(TrackTitle),
     CaptureLost,
     Recording(TrackTitle),
     /// The track is already in the output folder and is not recorded
@@ -160,9 +181,18 @@ struct Capture {
     device: OutputDevice,
 }
 
-fn start_capture() -> Result<Capture> {
+fn start_capture(
+    config: &RecorderConfig,
+    cable: &mut Option<CableRoute>,
+    events: &Sender<RecorderEvent>,
+) -> Result<Capture> {
     let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
-    let device = audio_setup::default_output_device()?;
+    if !config.virtual_cable {
+        leave_cable(processes.root);
+    } else if cable.is_none() {
+        *cable = CableRoute::enter(processes.root, events);
+    }
+    let device = audio_setup::spotify_output_device(processes.root)?;
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid: processes.root,
         source_channels: device.channels,
@@ -174,6 +204,96 @@ fn start_capture() -> Result<Capture> {
         packets,
         device,
     })
+}
+
+/// Spotify sent to the virtual cable for the length of a recording: it
+/// plays there silently, out of the headset's chain.
+struct CableRoute {
+    cable_id: String,
+    /// Spotify's own output device before (`None`: the default one).
+    previous: Option<String>,
+}
+
+impl CableRoute {
+    /// Sets the cable up (44.1 kHz) and sends Spotify (root process `pid`)
+    /// to it. `None`, with an event saying why, when that fails.
+    fn enter(pid: u32, events: &Sender<RecorderEvent>) -> Option<Self> {
+        let cable_id = match audio_setup::virtual_cable() {
+            Ok(Some((id, _))) => id,
+            Ok(None) => {
+                let _ = events.send(RecorderEvent::CableMissing);
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!("cannot list the output devices: {e}");
+                return None;
+            }
+        };
+        if let Ok(Some(default)) = audio_setup::cable_as_default() {
+            let _ = events.send(RecorderEvent::CableIsDefault(default));
+        }
+        // VB-Cable installs at 48 kHz: Spotify would be resampled on its
+        // way in. If this fails, the capture's setup warning says so.
+        if audio_setup::output_device(&cable_id).is_ok_and(|d| d.resamples())
+            && let Err(e) = device_config::set_sample_rate(&cable_id, CAPTURE_SAMPLE_RATE)
+        {
+            tracing::warn!("cannot set the cable to 44.1 kHz: {e}");
+        }
+        let current = routing::spotify_endpoint(pid).unwrap_or_else(|e| {
+            tracing::warn!("cannot read Spotify's output device: {e}");
+            None
+        });
+        // Already on the cable: left there by a session that did not end
+        // cleanly. The default device is the safe way back.
+        let previous = current.filter(|id| *id != cable_id);
+        if let Err(e) = routing::route_spotify(pid, Some(&cable_id)) {
+            let _ = events.send(RecorderEvent::Error(format!(
+                "cannot send Spotify to the virtual cable: {e}"
+            )));
+            return None;
+        }
+        Some(Self { cable_id, previous })
+    }
+}
+
+/// Gives Spotify its device back, however the session ends. Windows keeps
+/// the choice per executable, so this needs a running Spotify; otherwise
+/// the next session puts it back.
+impl Drop for CableRoute {
+    fn drop(&mut self) {
+        if let Some(processes) = SpotifyProcesses::find()
+            && let Err(e) = routing::route_spotify(processes.root, self.previous.as_deref())
+        {
+            tracing::warn!("cannot give Spotify its output device back: {e}");
+        }
+    }
+}
+
+/// Plays the capture on the default device, Spotify itself being silent in
+/// the cable. `None`, with an event saying why, when that fails.
+fn listen(cable_id: &str, events: &Sender<RecorderEvent>) -> Option<(Playback, Sender<Vec<f32>>)> {
+    match Playback::start(cable_id) {
+        Ok(playback) => Some(playback),
+        // The cable is the default device: [`RecorderEvent::CableIsDefault`]
+        // has said so already.
+        Err(Error::PlaybackLoop) => None,
+        Err(e) => {
+            let _ = events.send(RecorderEvent::Error(format!(
+                "cannot play Spotify on the headset: {e}"
+            )));
+            None
+        }
+    }
+}
+
+/// Takes Spotify off the virtual cable if a session left it there.
+fn leave_cable(pid: u32) {
+    let Ok(Some((cable_id, _))) = audio_setup::virtual_cable() else {
+        return;
+    };
+    if routing::spotify_endpoint(pid).is_ok_and(|id| id.as_deref() == Some(cable_id.as_str())) {
+        let _ = routing::route_spotify(pid, None);
+    }
 }
 
 fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<()>) -> Result<()> {
@@ -207,11 +327,20 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
     };
     let mut capture: Option<Capture> = None;
     let mut last_attempt: Option<Instant> = None;
+    // Dropped when the session ends, error or not: Spotify leaves the cable.
+    let mut cable: Option<CableRoute> = None;
+    let mut playback: Option<(Playback, Sender<Vec<f32>>)> = None;
 
     loop {
         if capture.is_none() && last_attempt.is_none_or(|t| t.elapsed() >= CAPTURE_RETRY) {
             last_attempt = Some(Instant::now());
-            if let Ok(started) = start_capture() {
+            if let Ok(started) = start_capture(config, &mut cable, events) {
+                if config.listen
+                    && playback.is_none()
+                    && let Some(route) = &cable
+                {
+                    playback = listen(&route.cable_id, events);
+                }
                 let _ = events.send(RecorderEvent::CaptureStarted {
                     pid: started.pid,
                     device: started.device.clone(),
@@ -227,6 +356,9 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
             recv(packets) -> packet => match packet {
                 Ok(packet) => {
                     sound.store(packet.samples.iter().any(|&s| s != 0.0), Ordering::Relaxed);
+                    if let Some((_, to_headset)) = &playback {
+                        let _ = to_headset.send(packet.samples.clone());
+                    }
                     session.audio(&packet)?;
                 }
                 Err(_) => {
@@ -244,6 +376,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
     }
 
     monitor.stop();
+    drop(playback);
     if let Some(capture) = capture {
         let _ = capture.capture.stop();
     }
@@ -439,6 +572,9 @@ fn encode_jobs(
     // Order of the tracks saved in this session, for `Prefix::OrderNumber`.
     let mut order = 0;
     for job in jobs {
+        if job.analysis.fades_in() {
+            let _ = events.send(RecorderEvent::SpotifyFades(job.ended.track.title.clone()));
+        }
         let event = match encode(config, deezer.as_ref(), library, order + 1, &job) {
             Ok(event) => event,
             Err(e) => RecorderEvent::Error(format!("{}: {e}", job.ended.track.title)),

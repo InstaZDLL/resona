@@ -1,4 +1,4 @@
-//! Turning the continuous capture into one recording per track.
+//! Turning the continuous ca.map(|p| p.frame.saturating_sub(self.snap_window(p).before))ture into one recording per track.
 //!
 //! The monitor reports changes late: after the next poll, and after
 //! Spotify updated its title. So audio is held back for [`HORIZON`] before
@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use super::boundary::snap_to_silence;
+use super::boundary::{Window, snap_to_silence};
 use crate::spotify::state::{Content, Track};
 use crate::spotify::title::TrackTitle;
 
@@ -22,10 +22,15 @@ pub const HORIZON: Duration = Duration::from_secs(3);
 /// SMTC updates field by field, and the next track's fields have been
 /// seen next to the previous title.
 pub const DETAILS_SETTLE: Duration = Duration::from_millis(1500);
-/// How far a cut may move to land on silence: a title-based estimate is
-/// off by up to a poll, a SMTC-dated one by Spotify's output latency.
-const SNAP_ESTIMATED: Duration = Duration::from_millis(300);
-const SNAP_DATED: Duration = Duration::from_millis(100);
+/// How far a cut may move to land on silence (before, after): a
+/// title-based estimate is off by up to a poll, a SMTC-dated one by
+/// Spotify's output latency. Wider windows were tried on 2026-10-03 and
+/// were wrong: the drift they chased came from Spotify's crossfade and
+/// Automix, switched back on by a Spotify update. They also risk cutting
+/// into a quiet intro.
+const SNAP_DATED: (Duration, Duration) = (Duration::from_millis(100), Duration::from_millis(100));
+const SNAP_ESTIMATED: (Duration, Duration) =
+    (Duration::from_millis(300), Duration::from_millis(300));
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -231,13 +236,17 @@ impl Splitter {
         self.write_until(upto.min(self.write_limit()), actions);
     }
 
-    fn snap_window(&self, pending: &Pending) -> u64 {
-        let window = if pending.dated {
+    fn snap_window(&self, pending: &Pending) -> Window {
+        let (before, after) = if pending.dated {
             SNAP_DATED
         } else {
             SNAP_ESTIMATED
         };
-        (window.as_secs_f64() * f64::from(self.sample_rate)) as u64
+        let frames = |d: Duration| (d.as_secs_f64() * f64::from(self.sample_rate)) as u64;
+        Window {
+            before: frames(before),
+            after: frames(after),
+        }
     }
 
     /// Audio may be written up to the search window of the next pending
@@ -246,7 +255,7 @@ impl Splitter {
         self.pending
             .iter()
             .filter(|p| matches!(p.change, Change::Content(_)))
-            .map(|p| p.frame.saturating_sub(self.snap_window(p)))
+            .map(|p| p.frame.saturating_sub(self.snap_window(p).before))
             .min()
             .unwrap_or(u64::MAX)
     }
