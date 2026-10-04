@@ -25,10 +25,11 @@ use crate::encode::{Quantizer, flac, mp3, wav, wav::CaptureWav};
 use crate::format::CAPTURE_SAMPLE_RATE;
 use crate::format::OutputFormat;
 use crate::metadata::deezer::DeezerClient;
-use crate::metadata::tags::TrackTags;
+use crate::metadata::name_match::title_similarity;
 use crate::metadata::{self, TagsOutcome};
 use crate::playback::Playback;
 use crate::routing;
+use crate::spotify::cli::{NowPlaying, SpotifyCli};
 use crate::spotify::monitor::{Monitor, MonitorEvent};
 use crate::spotify::process::SpotifyProcesses;
 use crate::spotify::smtc::Smtc;
@@ -324,6 +325,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
         library,
         smtc: None,
         ad_muted: false,
+        playing: PlayingWatch::spawn(),
     };
     let mut capture: Option<Capture> = None;
     let mut last_attempt: Option<Instant> = None;
@@ -390,6 +392,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
 
 struct Writer {
     title: TrackTitle,
+    uri: Option<String>,
     wav: CaptureWav,
     path: PathBuf,
     analysis: BitAnalysis,
@@ -399,6 +402,61 @@ struct Job {
     ended: Ended,
     wav: PathBuf,
     analysis: BitAnalysis,
+    /// The catalogue entry played, for exact tags.
+    uri: Option<String>,
+}
+
+/// What Spotify plays, as its command-line tool reports it, every
+/// [`WATCH_INTERVAL`]: gives each recording the exact catalogue entry
+/// (search cannot tell a song's releases apart, and some are not found at
+/// all: the album version of 阿修羅ちゃん, 2026-10-04).
+struct PlayingWatch {
+    latest: Arc<Mutex<Option<NowPlaying>>>,
+    stop: Arc<AtomicBool>,
+}
+
+const WATCH_INTERVAL: Duration = Duration::from_secs(2);
+
+impl PlayingWatch {
+    /// `None` without Spotify's command-line tool.
+    fn spawn() -> Option<Self> {
+        let cli = SpotifyCli::find().ok()?;
+        let latest = Arc::new(Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (thread_latest, thread_stop) = (Arc::clone(&latest), Arc::clone(&stop));
+        thread::Builder::new()
+            .name("spytify-catalogue-watch".into())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::Relaxed) {
+                    if let Ok(playing) = cli.now_playing()
+                        && let Ok(mut latest) = thread_latest.lock()
+                    {
+                        *latest = playing;
+                    }
+                    thread::sleep(WATCH_INTERVAL);
+                }
+            })
+            .ok()?;
+        Some(Self { latest, stop })
+    }
+
+    /// The entry playing, if it is `title` (the watch may lag a track).
+    fn uri_for(&self, title: &TrackTitle) -> Option<String> {
+        let latest = self.latest.lock().ok()?;
+        let playing = latest.as_ref()?;
+        // `Title — Artist, Artist`.
+        let played = playing.description.split(" — ").next().unwrap_or_default();
+        let same = [title.full_title(), title.title.clone()]
+            .iter()
+            .any(|t| title_similarity(played, t) >= 0.85);
+        same.then(|| playing.uri.clone())
+    }
+}
+
+impl Drop for PlayingWatch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
 }
 
 struct Session {
@@ -415,6 +473,8 @@ struct Session {
     /// Opened on first use, to ask Spotify for the next track.
     smtc: Option<Smtc>,
     ad_muted: bool,
+    /// Exact catalogue entries for the tags.
+    playing: Option<PlayingWatch>,
 }
 
 impl Session {
@@ -484,6 +544,7 @@ impl Session {
                         .events
                         .send(RecorderEvent::Recording(track.title.clone()));
                     self.writer = Some(Writer {
+                        uri: self.playing.as_ref().and_then(|w| w.uri_for(&track.title)),
                         title: track.title,
                         wav: CaptureWav::create(&path)?,
                         path,
@@ -507,6 +568,7 @@ impl Session {
                             ended,
                             wav: writer.path,
                             analysis: writer.analysis,
+                            uri: writer.uri,
                         });
                     }
                 }
@@ -560,22 +622,33 @@ fn unique_stamp() -> String {
     format!("track-{nanos}")
 }
 
+/// Where tags come from.
+struct Catalogues {
+    deezer: Option<DeezerClient>,
+    spotify: Option<SpotifyCli>,
+}
+
 fn encode_jobs(
     config: &RecorderConfig,
     library: &Mutex<Library>,
     jobs: &Receiver<Job>,
     events: &Sender<RecorderEvent>,
 ) {
-    let deezer = DeezerClient::new()
-        .inspect_err(|e| tracing::warn!("no Deezer client, Spotify tags only: {e}"))
-        .ok();
+    let catalogues = Catalogues {
+        deezer: DeezerClient::new()
+            .inspect_err(|e| tracing::warn!("no Deezer client: {e}"))
+            .ok(),
+        spotify: SpotifyCli::find()
+            .inspect_err(|e| tracing::warn!("no Spotify catalogue: {e}"))
+            .ok(),
+    };
     // Order of the tracks saved in this session, for `Prefix::OrderNumber`.
     let mut order = 0;
     for job in jobs {
         if job.analysis.fades_in() {
             let _ = events.send(RecorderEvent::SpotifyFades(job.ended.track.title.clone()));
         }
-        let event = match encode(config, deezer.as_ref(), library, order + 1, &job) {
+        let event = match encode(config, &catalogues, library, order + 1, &job) {
             Ok(event) => event,
             Err(e) => RecorderEvent::Error(format!("{}: {e}", job.ended.track.title)),
         };
@@ -589,7 +662,7 @@ fn encode_jobs(
 
 fn encode(
     config: &RecorderConfig,
-    deezer: Option<&DeezerClient>,
+    catalogues: &Catalogues,
     library: &Mutex<Library>,
     order: u32,
     job: &Job,
@@ -632,13 +705,12 @@ fn encode(
         }
         OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps)?,
     }
-    let (tags, outcome) = match deezer {
-        Some(client) => metadata::tags_for(client, &job.ended.track),
-        None => (
-            TrackTags::from_spotify(&job.ended.track),
-            TagsOutcome::Unavailable("no HTTP client".into()),
-        ),
-    };
+    let (tags, outcome) = metadata::tags_for(
+        catalogues.deezer.as_ref(),
+        catalogues.spotify.as_ref(),
+        &job.ended.track,
+        job.uri.as_deref(),
+    );
     let tagged = tags.write(&staged, format);
 
     // Filed with the tags just found: the album artist and album name

@@ -76,9 +76,6 @@ msgstr "⚠ Le câble virtuel est le périphérique de sortie par défaut de Win
 msgid "Use \"{}\" again"
 msgstr "Revenir à « {} »"
 
-msgid "⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings."
-msgstr "⚠ « {} » a été modifié entre Spotify et l'enregistrement (effet, rééchantillonnage ou volume). Vérifiez les réglages audio."
-
 # Recording
 msgid "Finishing the last track…"
 msgstr "Finalisation du dernier morceau…"
@@ -240,3 +237,21 @@ msgstr "⏸ En pause : lancez la lecture dans Spotify"
 
 msgid "Play something in Spotify"
 msgstr "Lancez une lecture dans Spotify"
+
+msgid "⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off."
+msgstr "⚠ La normalisation du volume de Spotify est activée : elle modifie le son. Spotify → Paramètres → Lecture → Normaliser le volume → désactivé."
+
+msgid "⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off."
+msgstr "⚠ Automix de Spotify est activé : il mixe les transitions des playlists. Spotify → Paramètres → Lecture → Automix → désactivé."
+
+msgid "⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Spytify's settings."
+msgstr "⚠ Spotify ne lit pas en Lossless. Spotify → Paramètres → Qualité audio → Lossless, ou changez la qualité Spotify dans les réglages de Spytify."
+
+msgid "⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings."
+msgstr "⚠ Morceaux modifiés entre Spotify et l'enregistrement : {} (dernier : « {} »). Vérifiez le volume de Spotify et les réglages audio."
+
+msgid "⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless."
+msgstr "⚠ Le volume de Spotify est à {} % : les enregistrements sont atténués et ne sont pas sans perte."
+
+msgid "Set Spotify to 100 %"
+msgstr "Mettre Spotify à 100 %"

@@ -12,14 +12,15 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use spytify_core::analysis::Fidelity;
 use spytify_core::audio_setup::{CableAsDefault, SetupIssue};
-use spytify_core::metadata::TagsOutcome;
 use spytify_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
 use spytify_core::recorder::playlist_session::{
     Entry, EntryState, PlaylistEvent, PlaylistSession, Source,
 };
 use spytify_core::settings::Settings;
+use spytify_core::spotify::cli::SpotifyCli;
 use spytify_core::spotify::link::SpotifyLink;
 use spytify_core::spotify::monitor::{Monitor, MonitorEvent};
+use spytify_core::spotify::prefs::{PrefsIssue, SpotifyPrefs};
 use spytify_core::spotify::state::{Content, Event};
 use spytify_core::spotify::title::TrackTitle;
 
@@ -49,6 +50,7 @@ pub fn run() -> anyhow::Result<()> {
     window.set_tracks(ModelRc::from(tracks.clone()));
     let notices = Rc::new(VecModel::<Notice>::default());
     window.set_notices(ModelRc::from(notices.clone()));
+    check_spotify_settings(&notices, &settings.borrow());
 
     // Spotify's state is shown whether recording or not.
     let (monitor, monitor_events) = Monitor::spawn(|| false)?;
@@ -207,6 +209,35 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
 
+    window.on_spotify_volume_max({
+        let weak = window.as_weak();
+        move || {
+            let weak = weak.clone();
+            thread::spawn(move || {
+                let result = SpotifyCli::find().and_then(|cli| cli.volume(1.0));
+                let _ = weak.upgrade_in_event_loop(move |w| {
+                    let notices = w.get_notices();
+                    let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
+                        return;
+                    };
+                    let mut kept: Vec<Notice> = notices
+                        .iter()
+                        .filter(|n| n.kind != Warning::SpotifyVolume)
+                        .collect();
+                    if let Err(e) = result {
+                        kept.push(Notice {
+                            kind: Warning::Error,
+                            detail: e.to_string().into(),
+                            ..Notice::default()
+                        });
+                    }
+                    notices.set_vec(kept);
+                });
+            });
+        }
+    });
+    check_spotify_volume(window.as_weak());
+
     window.on_open_cable_site(|| {
         let _ = std::process::Command::new("explorer")
             .arg("https://vb-audio.com/Cable/")
@@ -350,6 +381,8 @@ impl Session {
             thread::spawn(move || finished.stop());
         }
         self.notices.set_vec(Vec::new());
+        check_spotify_settings(&self.notices, &self.settings.borrow());
+        check_spotify_volume(window.as_weak());
         window.set_saved_count(0);
         window.set_missed_count(0);
         window.set_playlist_name(SharedString::new());
@@ -453,19 +486,27 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
             match (*event, row) {
                 (
                     RecorderEvent::Saved {
+                        title,
                         fidelity,
                         duration,
                         tags,
                         path,
-                        ..
                     },
                     Some((index, mut row)),
                 ) if row.state == TrackState::Saved => {
                     describe(&mut row, fidelity, duration);
-                    row.tagged = tags == TagsOutcome::Deezer;
+                    row.tagged = tags.is_complete();
                     row.format = extension(&path).into();
                     tracks.set_row_data(index, row);
                     window.set_saved_count(window.get_saved_count() + 1);
+                    if fidelity == Fidelity::Processed
+                        && let Some(notices) = window
+                            .get_notices()
+                            .as_any()
+                            .downcast_ref::<VecModel<Notice>>()
+                    {
+                        note_processed(notices, &title);
+                    }
                 }
                 (
                     RecorderEvent::Discarded {
@@ -685,16 +726,12 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
         } => {
             let mut saved = row(&title, TrackState::Saved);
             describe(&mut saved, fidelity, duration);
-            saved.tagged = tags == TagsOutcome::Deezer;
+            saved.tagged = tags.is_complete();
             saved.format = extension(&path).into();
             replace_recording(tracks, &title, saved);
             window.set_saved_count(window.get_saved_count() + 1);
             if fidelity == Fidelity::Processed {
-                notices.push(Notice {
-                    kind: Warning::Processed,
-                    detail: title.to_string().into(),
-                    ..Notice::default()
-                });
+                note_processed(notices, &title);
             }
         }
         RecorderEvent::Discarded {
@@ -796,4 +833,76 @@ fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, row: Track
         Some(i) => tracks.set_row_data(i, row),
         None => tracks.push(row),
     }
+}
+
+/// Warns about Spotify settings that alter the sound, from its `prefs`
+/// file: before recording rather than after.
+fn check_spotify_settings(notices: &VecModel<Notice>, settings: &Settings) {
+    let Some(prefs) = SpotifyPrefs::load() else {
+        return;
+    };
+    let lossless = settings.spotify_quality == spytify_core::settings::Quality::Lossless;
+    for issue in prefs.issues(lossless) {
+        let kind = match issue {
+            PrefsIssue::Normalize => Warning::SpotifyNormalize,
+            PrefsIssue::Automix => Warning::SpotifyAutomix,
+            PrefsIssue::NotLossless => Warning::SpotifyNotLossless,
+        };
+        if !notices.iter().any(|n| n.kind == kind) {
+            notices.push(Notice {
+                kind,
+                ..Notice::default()
+            });
+        }
+    }
+}
+
+/// One notice for every altered track: their count and the latest.
+fn note_processed(notices: &VecModel<Notice>, title: &TrackTitle) {
+    let existing = (0..notices.row_count()).find(|&i| {
+        notices
+            .row_data(i)
+            .is_some_and(|n| n.kind == Warning::Processed)
+    });
+    match existing {
+        Some(index) => {
+            let mut notice = notices.row_data(index).expect("index in range");
+            let count = notice.device.parse::<u32>().unwrap_or(1) + 1;
+            notice.device = count.to_string().into();
+            notice.detail = title.to_string().into();
+            notices.set_row_data(index, notice);
+        }
+        None => notices.push(Notice {
+            kind: Warning::Processed,
+            device: "1".into(),
+            detail: title.to_string().into(),
+        }),
+    }
+}
+
+/// Warns, without blocking the UI, when Spotify's own volume is below
+/// 100 %: the capture is then scaled and never bit-perfect.
+fn check_spotify_volume(window: Weak<AppWindow>) {
+    thread::spawn(move || {
+        let Ok(cli) = SpotifyCli::find() else { return };
+        let Ok(Some(volume)) = cli.local_volume() else {
+            return;
+        };
+        if volume >= 100 {
+            return;
+        }
+        let _ = window.upgrade_in_event_loop(move |w| {
+            let notices = w.get_notices();
+            let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
+                return;
+            };
+            if !notices.iter().any(|n| n.kind == Warning::SpotifyVolume) {
+                notices.push(Notice {
+                    kind: Warning::SpotifyVolume,
+                    detail: volume.to_string().into(),
+                    ..Notice::default()
+                });
+            }
+        });
+    });
 }

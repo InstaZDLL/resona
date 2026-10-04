@@ -5,7 +5,7 @@ export enum TrackState { waiting, recording, saved, discarded, already-recorded,
 /// Quality of a saved or discarded track, from the fidelity analysis.
 export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
 export enum Reason { none, partial, too-short, already-recorded }
-export enum Warning { enhancements, sample-rate, processed, spotify-fades, cable-missing, cable-default, error }
+export enum Warning { enhancements, sample-rate, processed, spotify-volume, spotify-fades, spotify-normalize, spotify-automix, spotify-not-lossless, cable-missing, cable-default, error }
 
 export struct TrackRow {
     title: string,
@@ -248,6 +248,7 @@ export component AppWindow inherits Window {
     callback open-cable-site();
     /// Makes the device `id` the Windows default again.
     callback restore-default-device(string);
+    callback spotify-volume-max();
     callback quality-changed(int);
     callback settings-changed();
     callback language-changed(int);
@@ -364,8 +365,12 @@ export component AppWindow inherits Window {
                         : notice.kind == Warning.sample-rate ? @tr("⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings.", notice.device, notice.detail)
                         : notice.kind == Warning.cable-missing ? @tr("⚠ No virtual cable installed: Spotify stays on its device. Install VB-Cable or turn the option off in the settings.")
                         : notice.kind == Warning.spotify-fades ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                        : notice.kind == Warning.spotify-normalize ? @tr("⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off.")
+                        : notice.kind == Warning.spotify-automix ? @tr("⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off.")
+                        : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Spytify's settings.")
                         : notice.kind == Warning.cable-default ? @tr("⚠ The virtual cable is the Windows default output device: nothing can be heard.")
-                        : notice.kind == Warning.processed ? @tr("⚠ \"{}\" was altered on its way out of Spotify (effect, resampling or volume). Check the audio settings.", notice.detail)
+                        : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings.", notice.device, notice.detail)
+                        : notice.kind == Warning.spotify-volume ? @tr("⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless.", notice.detail)
                         : notice.detail;
                 }
                 if notice.kind == Warning.cable-default && notice.device != "": Text {
@@ -375,6 +380,15 @@ export component AppWindow inherits Window {
                     TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.restore-default-device(notice.detail); }
+                    }
+                }
+                if notice.kind == Warning.spotify-volume: Text {
+                    text: @tr("Set Spotify to 100 %");
+                    color: #0a84ff;
+                    font-weight: 700;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.spotify-volume-max(); }
                     }
                 }
             }
