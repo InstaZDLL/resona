@@ -51,7 +51,7 @@
 
 |  |  |
 | --- | --- |
-| 🎯 **Proven lossless** | Not "probably lossless": every sample is checked against the 16- and 24-bit grids. A track is labelled *bit-perfect* only if it is the exact integer stream Spotify decoded, give or take the few hundred samples Spotify itself softens around a pause (at most 1 in 10,000); anything else gets its own badge. |
+| 🎯 **Proven lossless** | Resona checks every sample and tells you whether the recording is bit-perfect, processed by Spotify, or altered somewhere in the audio chain. |
 | 🔇 **Only Spotify's sound** | Per-process capture: notifications, videos and other apps never end up in your files. |
 | 📋 **Paste a playlist, walk away** | Private playlists and albums included. Resona starts them in Spotify, records every track and pauses Spotify at the end. |
 | 🏷️ **Files you don't have to fix** | Album, track number, date, copyright, 640 px cover of the release actually played, and synced lyrics in a `.lrc`. |
@@ -83,6 +83,7 @@
 
 ### 🎚️ A clean signal, checked for you
 
+- **How the check works**: an untouched lossless stream is made of exact 16- or 24-bit values, so any gain, resampling or effect shows on every sample. A track is *bit-perfect* when it is that exact stream, give or take the few hundred samples Spotify itself softens around a pause (at most 1 in 10,000).
 - **Before recording**, Resona warns about anything that would alter the sound: Spotify's volume below 100 % (one click sets it back), normalization, Automix, a quality other than Lossless, Windows audio enhancements, an output device not at 44.1 kHz.
 - **Virtual cable mode** (optional, [VB-Cable](https://vb-audio.com/Cable/)): Spotify plays silently into the cable, which Resona sets up by itself. Your headset's settings stop mattering, you can listen to something else — or have Resona play the recording back to you.
 - If Spotify adds a crossfade at a track change, Resona notices and tells you how to turn it off.
