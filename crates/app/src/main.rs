@@ -6,6 +6,9 @@ slint::include_modules!();
 mod app;
 #[cfg(windows)]
 mod cover;
+#[cfg(windows)]
+mod demo;
+mod i18n;
 mod mapping;
 #[cfg(windows)]
 mod tray;

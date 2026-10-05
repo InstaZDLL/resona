@@ -186,9 +186,6 @@ msgstr "Sortie audio"
 msgid "Play Spotify through a virtual cable"
 msgstr "Faire passer Spotify par un câble virtuel"
 
-msgid "While recording, Spotify plays silently on \"{}\", set up by Resona: your headset's settings no longer affect the recordings, and you can listen to something else."
-msgstr "Pendant l'enregistrement, Spotify joue en silence sur « {} », réglé par Resona : les réglages de votre casque n'affectent plus les enregistrements, et vous pouvez écouter autre chose."
-
 msgid "Hear Spotify while recording"
 msgstr "Entendre Spotify pendant l'enregistrement"
 

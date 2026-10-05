@@ -336,6 +336,7 @@ pub fn run() -> anyhow::Result<()> {
         );
     }
 
+    crate::demo::schedule(&window);
     window.show()?;
     slint::run_event_loop_until_quit()?;
 
@@ -382,6 +383,10 @@ struct Session {
 impl Session {
     /// Records everything Spotify plays, or the playlist `source`.
     fn start(&self, window: &AppWindow, source: Option<Source>) {
+        // Screenshots only: nothing is recorded in demo mode.
+        if crate::demo::active() {
+            return;
+        }
         // A playlist run that ended on its own is still held here.
         if let Some(finished) = self.running.borrow_mut().take() {
             thread::spawn(move || finished.stop());
@@ -631,6 +636,9 @@ fn forward<E: Send + 'static>(
 }
 
 fn on_monitor_event(window: &AppWindow, event: MonitorEvent) {
+    if crate::demo::active() {
+        return;
+    }
     let MonitorEvent::Status { event, .. } = event else {
         return;
     };

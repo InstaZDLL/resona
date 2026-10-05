@@ -215,7 +215,8 @@ Fait le 5 octobre 2026, en même temps que le renommage en **Resona** :
 - `core::update` : dernière release GitHub de `InstaZDLL/resona` (brouillons et préversions ignorés, versions comparées numériquement) ; alerte « Resona X est disponible » avec un lien, réglage « Rechercher les mises à jour au lancement ». Remplace `EspionSpotify.Updater` : c'est l'installateur qui met à jour.
 - Installateur : `cargo packager --release -p resona` (cargo-packager 0.11, NSIS, installation par utilisateur sans droits administrateur, français et anglais) → `target/packager/resona_<version>_x64-setup.exe` (8,5 Mo).
 - CI : `.github/workflows/ci.yml` (fmt, clippy `-D warnings`, tests sur `windows-latest`) et `release.yml` (sur un tag `v*` : version du tag = version de `Cargo.toml`, tests, installateur, release GitHub).
-- Reste : créer le dépôt GitHub et pousser ; licence ; couleur de marque (le vert `#1db954` est celui de Spotify) ; vérifier `spotify_cli` avec l'installateur classique.
+- Fait le 5 octobre 2026 : dépôt privé `InstaZDLL/resona`, licence MIT, logo et couleurs Resona. Dependabot (`.github/dependabot.yml` : cargo et GitHub Actions chaque lundi, `windows`, `windows-core` et `wasapi` retenus aux correctifs, comme dans WaveFlow). CodeQL (`codeql.yml` : Rust sous Windows et workflows, `security-extended`, à chaque push, pull request, chaque semaine, et avant chaque release) ; le dépôt étant privé, l'envoi vers l'onglet Security est tenté sans bloquer, et le job échoue lui-même s'il trouve quoi que ce soit. La release (`release.yml`) attend la vérification du tag et CodeQL. README refait avec badges et captures (mode démo `RESONA_DEMO`).
+- Reste : vérifier `spotify_cli` avec l'installateur classique ; signature de l'installateur.
 
 ## Lossless (nouvelle fonctionnalité)
 

@@ -21,6 +21,11 @@ pub struct CoverLoader {
 impl CoverLoader {
     pub fn spawn(window: Weak<AppWindow>) -> Self {
         let (requests, received) = crossbeam_channel::unbounded();
+        // Screenshots in demo mode must not show the cover of whatever the
+        // machine's Spotify plays: no loader, requests go nowhere.
+        if crate::demo::active() {
+            return Self { requests };
+        }
         thread::Builder::new()
             .name("resona-cover".into())
             .spawn(move || {

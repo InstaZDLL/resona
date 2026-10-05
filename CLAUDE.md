@@ -19,6 +19,7 @@ cargo fmt    --all
 
 cargo run -p resona                                                  # Slint app
 cargo packager --release -p resona                                   # installer in target/packager (needs cargo-packager)
+$env:RESONA_DEMO = "session"; cargo run -p resona                  # sample content for screenshots (also playlist, settings-0..3)
 cargo run -p resona-core --example capture_spotify -- 30 out.flac   # capture + fidelity diagnostics, needs Spotify playing
 cargo run -p resona-core --example record -- recordings 10          # real recording session, one FLAC per track
 ```
@@ -32,7 +33,7 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 - `metadata/` — `deezer` (blocking client, no key), `lookup` (pure: a Deezer hit is used only if title, artist and duration all agree), `tags` (`TrackTags`, written through lofty's concrete `VorbisComments`). Tags are best-effort: a failed lookup keeps Spotify's own details, never fails a recording.
 - `recorder/` — `splitter` (pure: holds audio back 3 s and places each change at the frame it happened), `clock`, `naming`, `engine` (Windows: capture + monitor + splitter + FLAC encoder thread).
 - `examples/` are the manual test harnesses against the real client: `capture_spotify`, `analyze_wav`, `spotify_probe`, `record`.
-- `crates/app` (`resona`) — Slint UI. `ui/*.slint` compiled by `build.rs` with the `fluent` style. Slint is built with `renderer-software` + `backend-winit` on purpose (low memory, measured in WaveFlow); don't switch renderers without measuring.
+- `crates/app` (`resona`) — Slint UI. `ui/*.slint` compiled by `build.rs` with the `fluent` style. Slint is built with `renderer-software` + `backend-winit` on purpose (low memory, measured in WaveFlow); don't switch renderers without measuring. Texts are English in `@tr()`, French in `translations/fr/LC_MESSAGES/resona.po`; `src/i18n.rs` fails the tests when a text has no translation or a translation no text. Errors reach the UI as `core::problem::Problem` and are worded by `problem-text` in the `.slint`.
 
 ## Invariants
 

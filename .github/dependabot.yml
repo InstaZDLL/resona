@@ -1,0 +1,61 @@
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - cargo
+    commit-message:
+      prefix: chore
+    groups:
+      cargo-patch-and-minor:
+        update-types:
+          - minor
+          - patch
+    # `windows-core` is declared next to `windows` only so that the
+    # `#[windows_core::interface]` macro in `core::routing` and
+    # `core::device_config` can name the copy `windows` already uses. Both
+    # must resolve to that same copy, and windows-rs numbers the two crates
+    # on their own lines (`windows 0.62.2` sits on `windows-core 0.62.x`),
+    # so neither may move alone. `wasapi` is built on `windows` too. Patches
+    # stay automatic (Cargo unifies them); minor and major bumps of the
+    # three are done by hand, together, when upstream realigns. Same rule
+    # and reasons as in WaveFlow.
+    ignore:
+      - dependency-name: "windows"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      - dependency-name: "windows-core"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      - dependency-name: "wasapi"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:15"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
+    groups:
+      github-actions-all:
+        patterns:
+          - "*"
