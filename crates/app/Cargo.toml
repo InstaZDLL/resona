@@ -45,6 +45,12 @@ icons = ["assets/resona.ico"]
 out-dir = "../../target/packager"
 before-packaging-command = "cargo build --release -p resona"
 binaries = [{ path = "resona", main = true }]
+# Installed next to resona.exe: the licences that ship with the binary.
+resources = [
+    { src = "../../LICENSE", target = "LICENSE.txt" },
+    { src = "../../THIRD_PARTY_NOTICES.md", target = "THIRD_PARTY_NOTICES.md" },
+    { src = "../../THIRD_PARTY_LICENSES.md", target = "THIRD_PARTY_LICENSES.md" },
+]
 
 [package.metadata.packager.nsis]
 installer-icon = "assets/resona.ico"

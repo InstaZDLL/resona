@@ -217,6 +217,9 @@ Design notes and every measurement behind the choices are in [`docs/PLAN.md`](do
 - Lyrics from [LRCLIB](https://lrclib.net), extra tags from [Deezer](https://developers.deezer.com/api).
 - Interface by [Slint](https://slint.dev), audio through [wasapi-rs](https://github.com/HEnquist/wasapi-rs), FLAC by [flacenc](https://github.com/yotarok/flacenc-rs), tags by [lofty](https://github.com/Serial-ATA/lofty-rs).
 - Resona is not affiliated with, endorsed or sponsored by Spotify.
+- Third-party licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), also installed next to `resona.exe`.
+
+<a href="https://slint.dev"><img src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png" height="48" alt="Made with Slint" /></a>
 
 ## License
 

@@ -51,6 +51,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --workspace --locked
       - run: cargo install cargo-packager --locked
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
+        with:
+          tool: cargo-about@0.9.2
+      # The licences installed next to resona.exe match the build exactly.
+      - run: cargo about generate --workspace --locked -o THIRD_PARTY_LICENSES.md about.hbs
 
       # Authenticode, as in WaveFlow and with the same certificate. It is
       # self-signed: files are signed (tampering shows) but Windows does

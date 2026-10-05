@@ -1,0 +1,31 @@
+# cargo-about: the licences of every crate compiled into resona.exe, written
+# to THIRD_PARTY_LICENSES.md (see THIRD_PARTY_NOTICES.md).
+#   cargo about generate --workspace -o THIRD_PARTY_LICENSES.md about.hbs
+
+# Resona ships for Windows only: Linux-only crates (gtk, glib…) never
+# reach the executable.
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Slint is used under its Royalty-free licence (Resona is MIT, not GPL),
+# whose attribution is the "Made with Slint" badge in the README.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "0BSD",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "LGPL-3.0",
+    "LicenseRef-Slint-Royalty-free-2.0",
+]
+
+# Slint's own licence text is a LicenseRef that cargo-about does not match
+# to a file: Slint is listed in THIRD_PARTY_NOTICES.md, with that text.

@@ -32,3 +32,27 @@ jobs:
       # Includes the check that every interface text has its French
       # translation (crates/app/src/i18n.rs).
       - run: cargo test --workspace --locked
+
+  licences:
+    name: Third-party licences up to date
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
+        with:
+          tool: cargo-about@0.9.2
+      # THIRD_PARTY_LICENSES.md ships with resona.exe: it must match
+      # Cargo.lock. After a dependency change (Dependabot included), run the
+      # same command and commit the result.
+      - run: cargo about generate --workspace --locked -o THIRD_PARTY_LICENSES.md about.hbs
+      - name: The committed file matches
+        shell: bash
+        run: |
+          if ! git diff --exit-code -- THIRD_PARTY_LICENSES.md; then
+            echo "::error::THIRD_PARTY_LICENSES.md is out of date: run 'cargo about generate --workspace -o THIRD_PARTY_LICENSES.md about.hbs' and commit it"
+            exit 1
+          fi

@@ -19,6 +19,7 @@ cargo fmt    --all
 
 cargo run -p resona                                                  # Slint app
 cargo packager --release -p resona                                   # installer in target/packager (needs cargo-packager)
+cargo about generate --workspace -o THIRD_PARTY_LICENSES.md about.hbs  # after any dependency change (CI checks it)
 $env:RESONA_DEMO = "session"; cargo run -p resona                  # sample content for screenshots (also playlist, settings-0..3)
 cargo run -p resona-core --example capture_spotify -- 30 out.flac   # capture + fidelity diagnostics, needs Spotify playing
 cargo run -p resona-core --example record -- recordings 10          # real recording session, one FLAC per track
