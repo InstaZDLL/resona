@@ -1,5 +1,7 @@
 # Builds the installer for a version tag (`v0.2.0`) and publishes it as a
-# GitHub release, which the app's update check then offers.
+# GitHub release, which the app's update check then offers. Nothing is
+# built unless the tag matches Cargo.toml, the tests pass and CodeQL finds
+# nothing.
 name: Release
 
 on:
@@ -7,27 +9,50 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: windows-latest
+  version:
+    name: Tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-      - name: The tag matches the version in Cargo.toml
-        shell: bash
-        run: |
+        with:
+          persist-credentials: false
+      - run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "tag $GITHUB_REF_NAME does not match version $version"
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version"
             exit 1
           fi
-      - run: cargo test --workspace
+
+  codeql:
+    name: CodeQL
+    needs: version
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+  release:
+    name: Build and publish
+    needs: [version, codeql]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo test --workspace --locked
       - run: cargo install cargo-packager --locked
       - run: cargo packager --release -p resona
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: target/packager/*.exe
           generate_release_notes: true

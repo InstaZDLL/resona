@@ -7,14 +7,28 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
+# A newer commit on the same branch or pull request supersedes the run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
+    name: Format, lint, test
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # The toolchain comes from rust-toolchain.toml.
       - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Includes the check that every interface text has its French
+      # translation (crates/app/src/i18n.rs).
+      - run: cargo test --workspace --locked

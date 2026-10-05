@@ -284,8 +284,8 @@ export component AppWindow inherits Window {
     callback settings-changed();
     callback language-changed(int);
 
-    property <bool> settings-open;
-    property <int> settings-tab;
+    in-out property <bool> settings-open;
+    in-out property <int> settings-tab;
     property <bool> show-audio-help;
 
     title: "Resona";
