@@ -65,7 +65,7 @@
 - **FLAC, WAV or MP3** — FLAC and WAV keep the depth of the source (16 or 24-bit), MP3 from 128 to 320 kbps.
 - **A quality badge on every track** — *bit-perfect 16/24-bit*, *peaks limited by Spotify*, *slightly changed by Spotify* or *altered*, from an analysis of every sample.
 - **Incomplete tracks** (joined late, skipped) and very short ones are left out, unless you want them.
-- **Ads** (Spotify Free) are never recorded and can be muted.
+- **Ads** (Spotify Free) are left out of your saved tracks and can be muted (not yet tested with a Free account).
 
 ### 📋 Playlist mode
 

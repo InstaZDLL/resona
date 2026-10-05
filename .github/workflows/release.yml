@@ -120,8 +120,9 @@ jobs:
           } | Set-Content target/packager/SHA256SUMS.txt -Encoding ascii
           Get-Content target/packager/SHA256SUMS.txt
 
-      # The notes are written by hand in docs/releases/<tag>.md; GitHub's
-      # list of merged changes is appended to them.
+      # The notes are written by hand in docs/releases/<tag>.md, ending with a
+      # "Full changelog" link; GitHub's generated list is left out (for a
+      # first release it showed only a Dependabot bump).
       - name: The release notes exist
         shell: bash
         run: test -f "docs/releases/$GITHUB_REF_NAME.md" || { echo "::error::docs/releases/$GITHUB_REF_NAME.md is missing"; exit 1; }
@@ -133,4 +134,4 @@ jobs:
           files: |
             target/packager/*.exe
             target/packager/SHA256SUMS.txt
-          generate_release_notes: true
+          generate_release_notes: false
