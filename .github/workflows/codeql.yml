@@ -94,7 +94,8 @@ jobs:
                 if ($null -eq $result) { continue }
                 $findings++
                 $where = $result.locations[0].physicalLocation
-                Write-Host "::error file=$($where.artifactLocation.uri),line=$($where.region.startLine)::$($result.ruleId): $($result.message.text)"
+                $at = "$($where.artifactLocation.uri):$($where.region.startLine)"
+                Write-Host "::error file=$($where.artifactLocation.uri),line=$($where.region.startLine)::$at $($result.ruleId): $($result.message.text)"
               }
             }
           }

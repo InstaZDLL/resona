@@ -111,7 +111,26 @@ jobs:
             }
             Write-Host "$($file.Name): signed by $($sig.SignerCertificate.Subject), $($sig.Status)"
           }
+      # So a downloaded installer can be checked.
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem target/packager/*.exe | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content target/packager/SHA256SUMS.txt -Encoding ascii
+          Get-Content target/packager/SHA256SUMS.txt
+
+      # The notes are written by hand in docs/releases/<tag>.md; GitHub's
+      # list of merged changes is appended to them.
+      - name: The release notes exist
+        shell: bash
+        run: test -f "docs/releases/$GITHUB_REF_NAME.md" || { echo "::error::docs/releases/$GITHUB_REF_NAME.md is missing"; exit 1; }
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: target/packager/*.exe
+          name: Resona ${{ github.ref_name }}
+          body_path: docs/releases/${{ github.ref_name }}.md
+          files: |
+            target/packager/*.exe
+            target/packager/SHA256SUMS.txt
           generate_release_notes: true

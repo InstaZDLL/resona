@@ -10,7 +10,9 @@
 #![allow(non_snake_case)]
 
 use std::ffi::c_void;
+use std::ptr::NonNull;
 
+use windows::Win32::Foundation::E_POINTER;
 use windows::Win32::Media::Audio::{ERole, WAVEFORMATEX, eConsole, eMultimedia};
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 use windows::core::{GUID, HRESULT, HSTRING, PCWSTR};
@@ -68,10 +70,10 @@ pub fn set_sample_rate(endpoint_id: &str, rate: u32) -> Result<()> {
     unsafe {
         let mut endpoint = std::ptr::null_mut();
         policy.GetDeviceFormat(device, 0, &raw mut endpoint).ok()?;
-        let endpoint = Format::take(endpoint);
+        let endpoint = Format::take(endpoint)?;
         let mut mix = std::ptr::null_mut();
         policy.GetMixFormat(device, &raw mut mix).ok()?;
-        let mix = Format::take(mix);
+        let mix = Format::take(mix)?;
         let (endpoint, mix) = (endpoint.with_rate(rate), mix.with_rate(rate));
         policy
             .SetDeviceFormat(device, endpoint.as_ptr(), mix.as_ptr())
@@ -96,15 +98,21 @@ pub fn set_default_device(endpoint_id: &str) -> Result<()> {
 struct Format(Vec<u32>);
 
 impl Format {
-    /// Copies and frees a format COM allocated.
-    unsafe fn take(format: *mut WAVEFORMATEX) -> Self {
-        let size = size_of::<WAVEFORMATEX>() + usize::from(unsafe { (*format).cbSize });
+    /// Copies and frees a format COM allocated. A call that reports success
+    /// without filling the pointer is an error, not a read through null.
+    unsafe fn take(format: *mut WAVEFORMATEX) -> Result<Self> {
+        let format = NonNull::new(format).ok_or_else(|| windows::core::Error::from(E_POINTER))?;
+        let size = size_of::<WAVEFORMATEX>() + usize::from(unsafe { format.as_ref().cbSize });
         let mut words = vec![0_u32; size.div_ceil(4)];
         unsafe {
-            std::ptr::copy_nonoverlapping(format.cast::<u8>(), words.as_mut_ptr().cast(), size);
-            CoTaskMemFree(Some(format.cast()));
+            std::ptr::copy_nonoverlapping(
+                format.as_ptr().cast::<u8>(),
+                words.as_mut_ptr().cast(),
+                size,
+            );
+            CoTaskMemFree(Some(format.as_ptr().cast()));
         }
-        Self(words)
+        Ok(Self(words))
     }
 
     fn with_rate(mut self, rate: u32) -> Self {
@@ -118,5 +126,16 @@ impl Format {
 
     fn as_ptr(&self) -> *const WAVEFORMATEX {
         self.0.as_ptr().cast()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_null_format_is_an_error_not_a_read() {
+        let error = unsafe { Format::take(std::ptr::null_mut()) }.err().unwrap();
+        assert!(matches!(error, crate::Error::Windows(e) if e.code() == E_POINTER));
     }
 }
