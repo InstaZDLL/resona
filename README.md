@@ -49,12 +49,24 @@
 
 ## Why Resona
 
-|  |  |
-| --- | --- |
-| 🎯 **Proven lossless** | Resona checks every sample and tells you whether the recording is bit-perfect, processed by Spotify, or altered somewhere in the audio chain. |
-| 🔇 **Only Spotify's sound** | Per-process capture: notifications, videos and other apps never end up in your files. |
-| 📋 **Paste a playlist, walk away** | Private playlists and albums included. Resona starts them in Spotify, records every track and pauses Spotify at the end. |
-| 🏷️ **Files you don't have to fix** | Album, track number, date, copyright, 640 px cover of the release actually played, and synced lyrics in a `.lrc`. |
+<table>
+  <tr>
+    <td>🎯&nbsp;<b>Proven lossless</b></td>
+    <td>Resona checks every sample and tells you whether the recording is bit-perfect, processed by Spotify, or altered somewhere in the audio chain.</td>
+  </tr>
+  <tr>
+    <td>🔇&nbsp;<b>Only Spotify's sound</b></td>
+    <td>Per-process capture: notifications, videos and other apps never end up in your files.</td>
+  </tr>
+  <tr>
+    <td>📋&nbsp;<b>Paste a playlist, walk away</b></td>
+    <td>Private playlists and albums included. Resona starts them in Spotify, records every track and pauses Spotify at the end.</td>
+  </tr>
+  <tr>
+    <td>🏷️&nbsp;<b>Files you don't have to fix</b></td>
+    <td>Album, track number, date, copyright, 640 px cover of the release actually played, and synced lyrics in a <code>.lrc</code>.</td>
+  </tr>
+</table>
 
 ## Features
 
