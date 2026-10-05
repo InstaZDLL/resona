@@ -121,7 +121,7 @@
 2. Run it. It installs for your user only — no administrator rights needed.
 
 > [!NOTE]
-> The installer is not code-signed yet. On first launch Windows SmartScreen may say *"Windows protected your PC"*: click **More info**, then **Run anyway**.
+> The installer and `resona.exe` are signed, but with a self-signed certificate that Windows does not recognise as a publisher yet. On first launch SmartScreen may say *"Windows protected your PC"*: click **More info**, then **Run anyway**.
 
 **Requirements**
 
