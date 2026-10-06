@@ -7,7 +7,12 @@ $ErrorActionPreference = 'Stop'
 
 function Read-Exactly([IO.Stream]$Stream, [int]$Count) {
     $bytes = [byte[]]::new($Count)
-    $Stream.ReadExactly($bytes)
+    $offset = 0
+    while ($offset -lt $Count) {
+        $read = $Stream.Read($bytes, $offset, $Count - $offset)
+        if ($read -eq 0) { throw 'Unexpected end of FLAC file' }
+        $offset += $read
+    }
     return ,$bytes
 }
 
@@ -82,16 +87,17 @@ function Repair-Flac([IO.FileInfo]$File) {
         }
 
         $temporary = Join-Path $File.DirectoryName ('.' + $File.Name + '.seekfix-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        $backup = $temporary + '.bak'
         try {
             $output = [IO.File]::Create($temporary)
             try {
                 $null = $input.Seek(0, [IO.SeekOrigin]::Begin)
                 $metadata = Read-Exactly $input ([int]$audioStart)
                 $metadata[$lastHeaderOffset] = $metadata[$lastHeaderOffset] -band 127
-                $output.Write($metadata)
+                $output.Write($metadata, 0, $metadata.Length)
                 $output.WriteByte(0x83)
                 Write-BigEndian $output ([UInt64]$payload.Length) 3
-                $output.Write($payload)
+                $output.Write($payload, 0, $payload.Length)
                 $input.CopyTo($output)
             } finally {
                 $output.Dispose()
@@ -101,10 +107,11 @@ function Repair-Flac([IO.FileInfo]$File) {
             $probe = & ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate,duration -of csv=p=0 $temporary
             if ($LASTEXITCODE -ne 0 -or -not $probe) { throw 'Repaired FLAC failed validation' }
             $input.Dispose()
-            [IO.File]::Move($temporary, $File.FullName, $true)
+            [IO.File]::Replace($temporary, $File.FullName, $backup)
             Write-Output "Indexed: $($File.Name) ($($payload.Length / 18) points)"
         } finally {
             if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup }
         }
     } finally {
         $input.Dispose()
