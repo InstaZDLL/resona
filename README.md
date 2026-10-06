@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL" /></a>
-  <img src="https://img.shields.io/badge/version-0.1.0-2563eb?style=flat-square" alt="Version 0.1.0" />
+  <img src="https://img.shields.io/badge/version-0.2.0-2563eb?style=flat-square" alt="Version 0.2.0" />
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11" />
   <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit%20%2F%2044.1%20kHz-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit / 44.1 kHz" />
   <img src="https://img.shields.io/badge/rust-1.98-orange?style=flat-square&logo=rust" alt="Rust 1.98" />
@@ -182,6 +182,12 @@ Spotify applies a limiter to some loud masters. The quiet parts are exact, the l
 <summary><b>Every track says "altered". What did I miss?</b></summary>
 
 Look at the warnings at the top of the window: usually Spotify's volume below 100 %, normalization, a Windows audio enhancement, or the output device at 48 kHz. The virtual cable mode avoids the Windows side altogether.
+</details>
+
+<details>
+<summary><b>Why won't a playlist start while Spotify is open?</b></summary>
+
+Playlist mode needs Spotify's bundled `spotify_cli.exe`. Run `spotify_cli status --format json` in a terminal. If it says `client connection failed`, Spotify's local command interface is unavailable even though its window and normal playback still work. Fully quit and relaunch Spotify, then try the command again. Until it responds, use **Start recording** and play the playlist in Spotify yourself; stop the recording manually.
 </details>
 
 <details>

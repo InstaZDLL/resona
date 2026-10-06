@@ -324,6 +324,20 @@ mod tests {
         );
         tags.write_flac(&flac).unwrap();
 
+        let bytes = std::fs::read(&flac).unwrap();
+        let mut cursor = 4;
+        let mut has_seek_table = false;
+        loop {
+            let header = &bytes[cursor..cursor + 4];
+            has_seek_table |= header[0] & 0x7f == 3;
+            let length = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
+            cursor += 4 + length;
+            if header[0] & 0x80 != 0 {
+                break;
+            }
+        }
+        assert!(has_seek_table, "tag writing must preserve the seek table");
+
         let tagged = lofty::read_from_path(&flac).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         let tag = tagged.primary_tag().unwrap();

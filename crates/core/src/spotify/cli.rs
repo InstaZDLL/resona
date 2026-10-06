@@ -8,8 +8,10 @@
 //! undocumented internals other recorders hook into stay untouched.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -19,6 +21,9 @@ use crate::{Error, Result};
 /// A call that takes longer has hung (Spotify closed mid-call, a prompt;
 /// a `now-playing` hung 20 s once, 2026-10-04). Usually 0.3 s.
 const CALL_TIMEOUT: Duration = Duration::from_secs(8);
+/// A broken Spotify client currently takes about 24 s to report its own
+/// connection error. Give `status` time to return that useful diagnosis.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(35);
 /// URIs per `lookup` call.
 const LOOKUP_BATCH: usize = 50;
 
@@ -117,7 +122,7 @@ impl SpotifyCli {
     }
 
     pub fn status(&self) -> Result<Status> {
-        parse(&self.run(&["status"])?)
+        parse(&self.run_with_timeout(&["status"], STATUS_TIMEOUT)?)
     }
 
     /// A playlist or album (`spotify:playlist:…`, `spotify:album:…`) with
@@ -187,6 +192,10 @@ impl SpotifyCli {
 
     /// Runs one command, without a console window, and returns its JSON.
     fn run(&self, args: &[&str]) -> Result<String> {
+        self.run_with_timeout(args, CALL_TIMEOUT)
+    }
+
+    fn run_with_timeout(&self, args: &[&str], timeout: Duration) -> Result<String> {
         let mut command = Command::new(&self.exe);
         command
             .args(args)
@@ -200,32 +209,56 @@ impl SpotifyCli {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = command.spawn()?;
-        let started = Instant::now();
-        while child.try_wait()?.is_none() {
-            if started.elapsed() > CALL_TIMEOUT {
-                let _ = child.kill();
-                return Err(Error::SpotifyCli(format!("{} timed out", args.join(" "))));
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let output = child.wait_with_output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let message = if stderr.trim().is_empty() {
-                &stdout
-            } else {
-                &*stderr
-            };
-            return Err(Error::SpotifyCli(format!(
-                "{}: {}",
-                args.join(" "),
-                message.trim()
-            )));
-        }
-        Ok(stdout)
+        run_command(command, &args.join(" "), timeout)
     }
+}
+
+/// Drain both pipes while the child is running. A playlist's JSON can exceed
+/// the OS pipe capacity; waiting for exit before reading it deadlocks both
+/// sides until the timeout kills a healthy `spotify_cli` process.
+fn run_command(mut command: Command, label: &str, timeout: Duration) -> Result<String> {
+    let mut child = command.spawn()?;
+    let mut stdout_pipe = child.stdout.take().expect("stdout is piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr is piped");
+    let stdout_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout_pipe.read_to_end(&mut output).map(|_| output)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        stderr_pipe.read_to_end(&mut output).map(|_| output)
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() > timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(Error::SpotifyCli(format!("{label} timed out")));
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| std::io::Error::other("stdout reader panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| std::io::Error::other("stderr reader panicked"))??;
+    let stdout = String::from_utf8_lossy(&stdout).into_owned();
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr);
+        let message = if stderr.trim().is_empty() {
+            &stdout
+        } else {
+            &*stderr
+        };
+        return Err(Error::SpotifyCli(format!("{}: {}", label, message.trim())));
+    }
+    Ok(stdout)
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(json: &str) -> Result<T> {
@@ -320,6 +353,24 @@ fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn drains_large_child_output_before_waiting_for_exit() {
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[Console]::Out.Write('x' * 262144)",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = run_command(command, "large output", Duration::from_secs(8)).unwrap();
+        assert_eq!(output.len(), 262144);
+        assert!(output.bytes().all(|byte| byte == b'x'));
+    }
 
     // Answers captured from spotify_cli 1.3.1.234 on 2026-10-04.
 

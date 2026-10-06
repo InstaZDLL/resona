@@ -644,7 +644,9 @@ fn on_monitor_event(window: &AppWindow, event: MonitorEvent) {
     };
     match event {
         Event::RunningChanged { running } => {
-            if !running {
+            if running {
+                window.set_spotify_state(SpotifyState::Idle);
+            } else {
                 window.set_spotify_state(SpotifyState::NotRunning);
                 show_now_playing(window, None, None);
             }

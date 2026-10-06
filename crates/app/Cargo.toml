@@ -12,12 +12,12 @@ anyhow = "1.0.104"
 crossbeam-channel = "0.5.17"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rfd = { version = "0.17", default-features = false }
-# Same feature set as WaveFlow's measured Slint prototype: the software
-# renderer on winit kept the process around 10 MB private memory, which
-# matters for an app left recording overnight.
+# FemtoVG redraws the complete window after Windows discards an occluded
+# surface. Keep the software renderer available if OpenGL cannot start.
 slint = { version = "1.18", default-features = false, features = [
     "std",
     "backend-winit",
+    "renderer-femtovg",
     "renderer-software",
     "compat-1-18",
 ] }
