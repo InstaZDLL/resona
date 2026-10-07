@@ -1,4 +1,4 @@
-# Builds the installer for a version tag (`v0.2.0`) and publishes it as a
+# Builds the installer for a version tag (`v0.2.1`) and publishes it as a
 # GitHub release, which the app's update check then offers. Nothing is
 # built unless the tag matches Cargo.toml, the tests pass and CodeQL finds
 # nothing.

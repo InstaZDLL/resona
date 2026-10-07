@@ -1,13 +1,12 @@
 //! FLAC output, the format of Spotify Lossless rips.
 
-use std::fs::File;
-use std::io::BufReader;
+use std::fs::OpenOptions;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use flacenc::component::{BitRepr, MetadataBlockData, Stream};
-use flacenc::error::{SourceError, Verify};
-use flacenc::source::{Fill, Source};
+use flac_bound::{FlacEncoder, WriteWrapper};
 use hound::{SampleFormat, WavReader};
+use md5::{Digest, Md5};
 
 use super::Quantizer;
 use crate::{Error, Result};
@@ -16,7 +15,7 @@ use crate::{Error, Result};
 /// FLAC at the quantizer's depth (16 or 24 bits).
 pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Result<()> {
     debug_assert!(quantizer.bits() == 16 || quantizer.bits() == 24);
-    let reader = WavReader::open(src)?;
+    let mut reader = WavReader::open(src)?;
     let spec = reader.spec();
     if spec.sample_format != SampleFormat::Float || spec.bits_per_sample != 32 {
         return Err(Error::UnsupportedWav("expected 32-bit float samples"));
@@ -24,117 +23,74 @@ pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Resul
     let sample_frames = reader.duration();
     let bits = quantizer.bits();
 
-    // flacenc 0.5.1's predictive modes have produced pathological 24-bit
-    // frames on real captures (up to 302 MB for 4096 samples). Such files
-    // report impossible STREAMINFO frame sizes and cannot be sought reliably.
-    // Verbatim/constant subframes remain bit-exact and have a hard size bound.
-    let mut config = flacenc::config::Encoder::default();
-    config.multithread = false;
-    config.subframe_coding.use_fixed = false;
-    config.subframe_coding.use_lpc = false;
-    let config = config
-        .into_verified()
-        .map_err(|(_, e)| Error::Flac(e.to_string()))?;
-    let source = WavSource {
-        reader,
-        quantizer,
-        buffer: Vec::new(),
-    };
-    let mut stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
-        .map_err(|e| Error::Flac(e.to_string()))?;
-    add_seek_table(&mut stream)?;
+    // libFLAC writes standard predictive frames. The previous pure-Rust
+    // encoder produced files that decoded sequentially but failed seeking in
+    // PotPlayer, even after their metadata was stripped and remuxed.
+    let mut output = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dst)?;
+    let mut pcm_md5 = Md5::new();
+    {
+        let mut writer = WriteWrapper(&mut output);
+        let config = FlacEncoder::new()
+            .ok_or_else(|| Error::Flac("could not create FLAC encoder".into()))?
+            .channels(u32::from(spec.channels))
+            .bits_per_sample(u32::from(bits))
+            .sample_rate(spec.sample_rate)
+            .total_samples_estimate(u64::from(sample_frames))
+            .compression_level(5)
+            .verify(true);
+        let mut encoder = config
+            .init_write(&mut writer)
+            .map_err(|e| Error::Flac(format!("could not initialize FLAC encoder: {e:?}")))?;
 
-    let mut sink = flacenc::bitsink::ByteSink::new();
-    stream
-        .write(&mut sink)
-        .map_err(|e| Error::Flac(e.to_string()))?;
-    let pcm_bytes = u64::from(sample_frames) * u64::from(spec.channels) * u64::from(bits) / 8;
-    let maximum = pcm_bytes + stream.frame_count() as u64 * 64 + 1_048_576;
-    if sink.as_slice().len() as u64 > maximum {
-        return Err(Error::Flac(
-            "FLAC frame size exceeds uncompressed audio".into(),
-        ));
-    }
-    std::fs::write(dst, sink.as_slice())?;
-    Ok(())
-}
-
-/// FLAC seek points store sample numbers and byte offsets relative to the
-/// first audio frame. They make seeking faster; valid FLAC does not require one.
-fn add_seek_table(stream: &mut Stream) -> Result<()> {
-    let interval = stream.stream_info().sample_rate() as u64 * 10;
-    let frames = (0..stream.frame_count()).map(|i| {
-        let frame = stream.frame(i).expect("frame index is in range");
-        debug_assert_eq!(frame.count_bits() % 8, 0);
-        (
-            frame.header().block_size() as u64,
-            frame.count_bits() as u64 / 8,
-        )
-    });
-    let points = seek_points(frames, interval);
-    if !points.is_empty() {
-        let block =
-            MetadataBlockData::new_unknown(3, &points).map_err(|e| Error::Flac(e.to_string()))?;
-        stream.add_metadata_block(block);
-    }
-    Ok(())
-}
-
-fn seek_points(frames: impl IntoIterator<Item = (u64, u64)>, interval: u64) -> Vec<u8> {
-    let mut points = Vec::new();
-    let (mut sample, mut offset, mut next) = (0u64, 0u64, 0u64);
-    for (block_samples, frame_bytes) in frames {
-        if sample >= next {
-            points.extend_from_slice(&sample.to_be_bytes());
-            points.extend_from_slice(&offset.to_be_bytes());
-            points.extend_from_slice(&(block_samples as u16).to_be_bytes());
-            next = sample.saturating_add(interval);
+        let channels = usize::from(spec.channels);
+        let mut quantizer = quantizer;
+        let mut buffer = Vec::with_capacity(4096 * channels);
+        let mut pcm_bytes = Vec::with_capacity(4096 * channels * usize::from(bits / 8));
+        for sample in reader.samples::<f32>() {
+            let quantized = quantizer.quantize(sample?);
+            buffer.push(quantized);
+            pcm_bytes.extend_from_slice(&quantized.to_le_bytes()[..usize::from(bits / 8)]);
+            if buffer.len() == 4096 * channels {
+                pcm_md5.update(&pcm_bytes);
+                pcm_bytes.clear();
+                encoder
+                    .process_interleaved(&buffer, 4096)
+                    .map_err(|()| Error::Flac(format!("FLAC encoder: {:?}", encoder.state())))?;
+                buffer.clear();
+            }
         }
-        sample += block_samples;
-        offset += frame_bytes;
-    }
-    points
-}
-
-/// Streams the WAV block by block, so a long track is never held in
-/// memory as raw PCM.
-struct WavSource {
-    reader: WavReader<BufReader<File>>,
-    quantizer: Quantizer,
-    buffer: Vec<i32>,
-}
-
-impl Source for WavSource {
-    fn channels(&self) -> usize {
-        usize::from(self.reader.spec().channels)
-    }
-
-    fn bits_per_sample(&self) -> usize {
-        usize::from(self.quantizer.bits())
-    }
-
-    fn sample_rate(&self) -> usize {
-        self.reader.spec().sample_rate as usize
-    }
-
-    fn read_samples<F: Fill>(
-        &mut self,
-        block_size: usize,
-        dest: &mut F,
-    ) -> Result<usize, SourceError> {
-        let channels = self.channels();
-        self.buffer.clear();
-        for sample in self.reader.samples::<f32>().take(block_size * channels) {
-            let sample = sample.map_err(SourceError::from_io_error)?;
-            self.buffer.push(self.quantizer.quantize(sample));
+        if !buffer.is_empty() {
+            if buffer.len() % channels != 0 {
+                return Err(Error::UnsupportedWav("incomplete audio frame"));
+            }
+            let frames = (buffer.len() / channels) as u32;
+            pcm_md5.update(&pcm_bytes);
+            encoder
+                .process_interleaved(&buffer, frames)
+                .map_err(|()| Error::Flac(format!("FLAC encoder: {:?}", encoder.state())))?;
         }
-        dest.fill_interleaved(&self.buffer)?;
-        Ok(self.buffer.len() / channels)
+        encoder
+            .finish()
+            .map_err(|encoder| Error::Flac(format!("FLAC encoder: {:?}", encoder.state())))?;
     }
-
-    fn len_hint(&self) -> Option<usize> {
-        Some(self.reader.duration() as usize)
+    // flac-bound supplies no seek callback, so libFLAC cannot backpatch the
+    // STREAMINFO checksum itself. The MD5 covers signed, interleaved PCM with
+    // each sample stored little-endian in exactly 16 or 24 bits.
+    output.seek(SeekFrom::Start(0))?;
+    let mut header = [0u8; 8];
+    output.read_exact(&mut header)?;
+    if &header[..4] != b"fLaC" || header[4] & 0x7f != 0 || header[5..8] != [0, 0, 34] {
+        return Err(Error::Flac("missing FLAC STREAMINFO header".into()));
     }
+    output.seek(SeekFrom::Start(26))?;
+    output.write_all(&pcm_md5.finalize())?;
+    output.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -162,13 +118,11 @@ mod tests {
         // STREAMINFO: bits-per-sample minus one sits across bytes 20-21.
         let bits = (((bytes[20] & 0x01) << 4) | (bytes[21] >> 4)) + 1;
         assert_eq!(bits, 24);
-        // Verbatim coding is bounded by the source PCM size plus frame headers.
+        // Lossless FLAC must remain smaller than raw PCM for this predictable ramp.
         assert!(bytes.len() < samples.len() * 3 + 4096);
-        // The encoder must emit a SEEKTABLE immediately after STREAMINFO.
-        assert_eq!(bytes[42] & 0x7f, 3);
-        assert_eq!(u32::from_be_bytes([0, bytes[43], bytes[44], bytes[45]]), 18);
-        assert_eq!(&bytes[46..54], &[0; 8]);
-        assert_eq!(&bytes[54..62], &[0; 8]);
+        // STREAMINFO must give players an exact duration for random access.
+        let total_samples = u64::from_be_bytes(bytes[18..26].try_into().unwrap()) & ((1 << 36) - 1);
+        assert_eq!(total_samples, 44_100);
 
         let decoded: Vec<i32> = claxon::FlacReader::open(&flac_path)
             .unwrap()
@@ -180,17 +134,11 @@ mod tests {
             .map(|&sample| Quantizer::new(24, 24).quantize(sample))
             .collect();
         assert_eq!(decoded, expected);
+        let mut pcm_md5 = Md5::new();
+        for sample in expected {
+            pcm_md5.update(&sample.to_le_bytes()[..3]);
+        }
+        assert_eq!(&bytes[26..42], pcm_md5.finalize().as_slice());
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn seek_points_reference_audio_frame_starts() {
-        let points = seek_points([(4, 10), (4, 12), (4, 14), (4, 16)], 8);
-        assert_eq!(points.len(), 36);
-        assert_eq!(&points[0..16], &[0; 16]);
-        assert_eq!(&points[16..18], &[0, 4]);
-        assert_eq!(u64::from_be_bytes(points[18..26].try_into().unwrap()), 8);
-        assert_eq!(u64::from_be_bytes(points[26..34].try_into().unwrap()), 22);
-        assert_eq!(u16::from_be_bytes(points[34..36].try_into().unwrap()), 4);
     }
 }

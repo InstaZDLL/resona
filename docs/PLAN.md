@@ -133,7 +133,7 @@ Plan initial :
 - WAV : `hound`.
 - MP3 CBR 128 à 320 kbps : `mp3lame-encoder` (LAME, comme la version C#).
 - FLAC : fait. Ajouter un dither TPDF quand l'utilisateur force 16 bits sur une source 24 bits.
-- Diagnostic du 6 octobre 2026 : l'absence de `SEEKTABLE` n'était pas la cause du seek impossible (un FLAC Sidify valide n'en contient pas non plus). Les modes prédictifs de `flacenc` 0.5.1 ont produit sur des captures 24 bits des trames de 33 à 302 Mo, parfois indécodables, au lieu d'environ 24 Ko. PotPlayer échoue lors du déplacement de la lecture. L'encodeur utilise désormais les sous-trames verbatim/constantes, sans prédiction ni parallélisme, avec un contrôle de taille et un index toutes les 10 secondes. `scripts/repair-flac-seektable.ps1` ajoute seulement l'index aux anciens fichiers ; il ne répare pas les trames anormales.
+- Diagnostic des 6 et 7 octobre 2026 : l'absence de `SEEKTABLE` n'était pas la cause du seek impossible (un FLAC Sidify valide n'en contient pas non plus). Les modes prédictifs de `flacenc` 0.5.1 ont produit sur des captures 24 bits des trames de 33 à 302 Mo, parfois indécodables. La v0.2.0 a désactivé ces modes et ajouté un index, mais PotPlayer revient encore à 00:00 sur « Mujo - Jazz Wizzard », même après remuxage sans tags ni index. Le même PCM réencodé par FFmpeg ou libFLAC se cherche correctement à 1:01 ; son empreinte SHA-256 décodée reste identique. L'encodeur utilise maintenant libFLAC en liaison statique. `scripts/repair-flac-seektable.ps1` ajoute seulement l'index aux anciens fichiers ; il ne répare pas leurs trames audio.
 
 ### Phase 4 — Tags et métadonnées (en cours)
 

@@ -47,6 +47,14 @@ are derived from [WaveFlow](https://github.com/InstaZDLL/WaveFlow), whose
 author, InstaZDLL, is also Resona's and the sole author of those files. They
 are licensed here under the MIT License, like the rest of Resona.
 
+## libFLAC (FLAC encoding)
+
+FLAC output uses [libFLAC](https://xiph.org/flac/), built from source and linked
+statically through the [`libflac-sys`](https://github.com/mgeier/libflac-sys)
+and [`flac-bound`](https://github.com/nabijaczleweli/flac-bound) crates.
+libFLAC is licensed under the BSD 3-Clause License; its copyright notices and
+license text are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
 ## LAME (MP3 encoding)
 
 MP3 output uses the [LAME](https://lame.sourceforge.io/) encoder, built from

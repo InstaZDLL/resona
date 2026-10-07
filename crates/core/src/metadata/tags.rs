@@ -314,6 +314,7 @@ mod tests {
         writer.write(&[0.25; 8_820]).unwrap();
         writer.finalize().unwrap();
         encode_wav_to_flac(&wav, &flac, crate::encode::Quantizer::new(16, 16)).unwrap();
+        let checksum = std::fs::read(&flac).unwrap()[26..42].to_vec();
 
         let mut tags = TrackTags::from_spotify(&spotify_track());
         tags.genres = vec!["Electro".into()];
@@ -323,20 +324,7 @@ mod tests {
                 .to_vec(),
         );
         tags.write_flac(&flac).unwrap();
-
-        let bytes = std::fs::read(&flac).unwrap();
-        let mut cursor = 4;
-        let mut has_seek_table = false;
-        loop {
-            let header = &bytes[cursor..cursor + 4];
-            has_seek_table |= header[0] & 0x7f == 3;
-            let length = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
-            cursor += 4 + length;
-            if header[0] & 0x80 != 0 {
-                break;
-            }
-        }
-        assert!(has_seek_table, "tag writing must preserve the seek table");
+        assert_eq!(&std::fs::read(&flac).unwrap()[26..42], checksum);
 
         let tagged = lofty::read_from_path(&flac).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
