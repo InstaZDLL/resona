@@ -196,6 +196,21 @@ On colle un lien de playlist, d'album ou de morceau ; l'appli enregistre toute l
 - `recorder::playlist_session` : aléatoire et répétition coupés, volume de Spotify à 100 %, enregistreur démarré avant la lecture, sondage chaque seconde, pause de Spotify à la fin, bilan des manquants. « Réessayer les manquants » les relance un par un (mode `Tracks`).
 - Interface : champ de lien, liste affichée d'avance (○ en attente), en-tête « nom · fait / total », lien « Réessayer les N manquants ». Exemple `record_playlist <lien>`.
 - Mesuré sur « BEST JP » (privée, 5 morceaux en 16 bits, par le câble) : 5 / 5 enregistrés, pause à l'arrivée de la lecture automatique. 阿修羅ちゃん bit-perfect 16 bits ; ダンスホール et Hi-Five crêtes limitées ; Flow et ヨワネハキ légèrement modifiés (proche de la grille 24 bits) alors qu'ils sont en 16 bits : traitement de Spotify lui-même, la même session ayant donné un bit-perfect. Clip vidéo écarté (lecture audio par défaut). L'étiquette « quasi sans perte, 24 bits » devient « légèrement modifié par Spotify ».
+- 14 octobre 2026 (Spotify 1.304.258, `spotify_cli` 1.3.4.258) : réponses inchangées. Le volume réglé avant `play` n'est pas toujours gardé : la session le revérifie à chaque nouveau morceau (`devices list`) et le remet à 100 %.
+- **Titres likés** : `playlist get spotify:user:<nom>:collection` les donne tous (1 284 en 0,7 s), `play` sur la même URI les lance ; `spotify:collection:tracks` échoue pour les deux (« client connection failed »), seul `lookup` l'accepte. Le nom vient de `spotify_cli me`. Liens acceptés : `open.spotify.com/collection/tracks`, `spotify:collection:tracks`, `spotify:user:<nom>:collection`.
+- Presse-papiers : un lien Spotify copié remplit le champ (sondage chaque seconde, seulement quand le texte copié change, jamais pendant un enregistrement). Lu **uniquement quand une fenêtre de Resona est au premier plan** (`GetForegroundWindow`) : jamais en arrière-plan, le presse-papiers pouvant contenir des mots de passe.
+
+### Ce qu'on retient de Sidify (14 octobre 2026)
+
+Analyse de Sidify All-In-One 2.6.4 (rétro-ingénierie, `E:\Workspace\sidify\rapport_sidify_recorder_mode.md`).
+
+- **Mode « Convert »** : réimplémente l'échange de licence Widevine avec un certificat d'appareil Spotify embarqué, puis déchiffre le flux. Contournement de mesure technique de protection (DMCA, directive 2001/29/CE art. 6) : **exclu définitivement**.
+- **« Record from App »** : DLL Detours injectée dans le processus audio de Spotify, hook de `IAudioRenderClient::GetBuffer`/`ReleaseBuffer`. Le « high speed » fait avaler les tampons N fois plus vite puis rééchantillonne. Exclu : injection, conditions de Spotify, et le rééchantillonnage détruit le bit-perfect.
+- **« Record from Web »** : redirige la sortie de l'appli vers un périphérique virtuel (`Windows.Media.Internal.AudioPolicyConfig`), comme notre câble, mais capture en 16 bits et rééchantillonne : Resona garde le float 32 bits à 44,1 kHz.
+- Suivi du morceau : `r.js` lit chaque seconde l'état interne de React du lecteur web (`__reactFiber$…` → `playerAPIInstance._state`), fragile à chaque mise à jour ; `spotify_cli now-playing` est officiel.
+- Repris : la surveillance du presse-papiers (`start-spotify-listen-clipboard`) et l'enregistrement des titres likés (`get-spotify-library-tracks`).
+- Indice non suivi pour l'instant : `media_handle.exe` a `record_count_down` / `noplay_count_down` ; Sidify lancerait chaque morceau seul et l'enregistrerait pendant sa durée connue. Notre mode `Tracks` fait déjà ça pour « Réessayer les manquants » ; à rendre par défaut si le suivi de playlist (`Mode::Context`) déçoit.
+- À faire : podcasts (`show`, `episode`), que Sidify accepte et que `LinkKind` refuse encore.
 
 ### Réglages de Spotify et tags exacts (4 octobre 2026)
 
