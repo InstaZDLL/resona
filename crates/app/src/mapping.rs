@@ -66,9 +66,11 @@ pub fn language_code(language: Language) -> &'static str {
     }
 }
 
-/// `3:21`, or `1:02:03` past an hour.
+/// `3:21`, or `1:02:03` past an hour. Rounded to the nearest second, as
+/// Spotify shows lengths: truncated, a complete 203.7 s recording read
+/// 3:23 where Spotify says 3:24, as if a second were missing.
 pub fn length(duration: Duration) -> String {
-    let seconds = duration.as_secs();
+    let seconds = (duration.as_millis() as u64 + 500) / 1000;
     let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
     if hours > 0 {
         format!("{hours}:{minutes:02}:{seconds:02}")
@@ -111,6 +113,9 @@ mod tests {
     fn lengths() {
         assert_eq!(length(Duration::from_secs(201)), "3:21");
         assert_eq!(length(Duration::from_secs(3723)), "1:02:03");
+        // ダンスホール, recorded whole: Spotify shows 3:24.
+        assert_eq!(length(Duration::from_millis(203_689)), "3:24");
+        assert_eq!(length(Duration::from_millis(203_499)), "3:23");
         assert_eq!(clock(Duration::from_secs(3723)), "01:02:03");
     }
 }
