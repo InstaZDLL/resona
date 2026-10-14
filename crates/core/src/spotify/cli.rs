@@ -88,6 +88,10 @@ pub struct TrackInfo {
     pub copyright: Option<String>,
     /// The 64 px cover.
     pub image_url: Option<String>,
+    /// Tempo, rounded: Spotify gives `168.001000`.
+    pub bpm: Option<u16>,
+    /// Musical key as ID3's TKEY writes it: `E`, `C#m`.
+    pub key: Option<String>,
 }
 
 /// A track `search` found.
@@ -180,7 +184,7 @@ impl SpotifyCli {
         for batch in uris.chunks(LOOKUP_BATCH) {
             let mut args = vec!["lookup"];
             args.extend(batch.iter().map(String::as_str));
-            args.extend(["--fields", "duration,release_date,copyright"]);
+            args.extend(["--fields", "duration,release_date,copyright,bpm,key,mode"]);
             found.extend(parse_lookup(&self.run(&args)?)?);
         }
         Ok(found)
@@ -349,6 +353,8 @@ fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
                     .map(Duration::from_millis),
                 release_date: field("release_date"),
                 copyright: field("copyright"),
+                bpm: field("bpm").as_deref().and_then(parse_bpm),
+                key: musical_key(field("key").as_deref(), field("mode").as_deref()),
                 name: entity.name,
                 artists: entity.contributors.into_iter().map(|c| c.name).collect(),
                 album: entity.parent.map(|p| (p.name, p.uri)),
@@ -357,6 +363,32 @@ fn parse_lookup(json: &str) -> Result<HashMap<String, TrackInfo>> {
             (entity.uri, info)
         })
         .collect())
+}
+
+/// `168.001000` → 168. Zero or unreadable: unknown.
+fn parse_bpm(value: &str) -> Option<u16> {
+    let bpm = value.trim().parse::<f64>().ok()?.round();
+    (1.0..=f64::from(u16::MAX))
+        .contains(&bpm)
+        .then_some(bpm as u16)
+}
+
+/// Spotify's `key` (`C#`) and `mode` (`minor`) in ID3's TKEY notation:
+/// `C#m`. A key that is not a note is left out.
+fn musical_key(key: Option<&str>, mode: Option<&str>) -> Option<String> {
+    let key = key?.trim();
+    let mut chars = key.chars();
+    let note_ok =
+        matches!(chars.next(), Some('A'..='G')) && matches!(chars.as_str(), "" | "#" | "b");
+    if !note_ok {
+        return None;
+    }
+    let minor = mode.is_some_and(|m| m.trim().eq_ignore_ascii_case("minor"));
+    Some(if minor {
+        format!("{key}m")
+    } else {
+        key.to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -423,6 +455,33 @@ mod tests {
             ))
         );
         assert_eq!(found["spotify:track:x"].duration, None);
+    }
+
+    // spotify_cli 1.3.4.258, 2026-10-14.
+    #[test]
+    fn reads_tempo_and_key() {
+        let json = r#"{"entities":[{"uri":"spotify:track:4hCdleTkpzQ0BD8X9Pzutm","type":"Song","name":"Otherside","metadata":[{"field":"duration","value":"222000"},{"field":"bpm","value":"168.001000"},{"field":"key","value":"E"},{"field":"mode","value":"major"},{"field":"camelot_key","value":"12B"}]},{"uri":"spotify:track:0cN6iBeCR7NgeBeTIKjLml","type":"Song","name":"Ashura-chan","metadata":[{"field":"bpm","value":"155.999000"},{"field":"key","value":"C#"},{"field":"mode","value":"minor"}]}]}"#;
+        let found = parse_lookup(json).unwrap();
+        let otherside = &found["spotify:track:4hCdleTkpzQ0BD8X9Pzutm"];
+        assert_eq!(otherside.bpm, Some(168));
+        assert_eq!(otherside.key.as_deref(), Some("E"));
+        let ashura = &found["spotify:track:0cN6iBeCR7NgeBeTIKjLml"];
+        assert_eq!(ashura.bpm, Some(156));
+        assert_eq!(ashura.key.as_deref(), Some("C#m"));
+    }
+
+    #[test]
+    fn odd_tempos_and_keys_are_left_out() {
+        assert_eq!(parse_bpm("0.000000"), None);
+        assert_eq!(parse_bpm("fast"), None);
+        assert_eq!(musical_key(Some("H"), Some("major")), None);
+        assert_eq!(musical_key(Some(""), None), None);
+        assert_eq!(
+            musical_key(Some("Bb"), Some("Minor")).as_deref(),
+            Some("Bbm")
+        );
+        assert_eq!(musical_key(Some("A"), None).as_deref(), Some("A"));
+        assert_eq!(musical_key(None, Some("minor")), None);
     }
 
     #[test]

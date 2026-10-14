@@ -35,6 +35,9 @@ pub struct SpotifyDetails {
     pub track_total: Option<u32>,
     /// 640 px.
     pub cover_url: Option<String>,
+    pub bpm: Option<u16>,
+    /// `E`, `C#m`.
+    pub key: Option<String>,
 }
 
 /// Looks `track` up in Spotify's catalogue, by the entry `played` when
@@ -124,6 +127,8 @@ pub fn find(
             .image_url
             .or(info.image_url.clone())
             .map(|url| large_cover(&url)),
+        bpm: info.bpm,
+        key: info.key.clone(),
     }))
 }
 

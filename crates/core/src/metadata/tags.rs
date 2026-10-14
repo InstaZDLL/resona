@@ -29,6 +29,9 @@ pub struct TrackTags {
     pub isrc: Option<String>,
     pub label: Option<String>,
     pub copyright: Option<String>,
+    /// Tempo and musical key from Spotify's catalogue (`E`, `C#m`).
+    pub bpm: Option<u16>,
+    pub key: Option<String>,
     pub cover: Option<Cover>,
     /// The catalogue the details come from, when not only Spotify.
     pub source: Option<&'static str>,
@@ -120,6 +123,10 @@ impl TrackTags {
         if details.copyright.is_some() {
             self.copyright = details.copyright.clone();
         }
+        self.bpm = details.bpm.or(self.bpm);
+        if details.key.is_some() {
+            self.key = details.key.clone();
+        }
         if (other_release || self.track_number.is_none()) && details.track_number.is_some() {
             self.track_number = details.track_number;
             self.track_total = details.track_total;
@@ -159,6 +166,8 @@ impl TrackTags {
         put("ISRC", &self.isrc);
         put("ORGANIZATION", &self.label);
         put("COPYRIGHT", &self.copyright);
+        put("BPM", &self.bpm.map(|n| n.to_string()));
+        put("INITIALKEY", &self.key);
         put("TRACKNUMBER", &self.track_number.map(|n| n.to_string()));
         put("TRACKTOTAL", &self.track_total.map(|n| n.to_string()));
         put("DISCNUMBER", &self.disc_number.map(|n| n.to_string()));
@@ -219,6 +228,8 @@ impl TrackTags {
         put(ItemKey::Isrc, self.isrc.clone());
         put(ItemKey::Label, self.label.clone());
         put(ItemKey::CopyrightMessage, self.copyright.clone());
+        put(ItemKey::IntegerBpm, self.bpm.map(|n| n.to_string()));
+        put(ItemKey::InitialKey, self.key.clone());
         put(
             ItemKey::TrackNumber,
             self.track_number.map(|n| n.to_string()),
@@ -318,6 +329,8 @@ mod tests {
 
         let mut tags = TrackTags::from_spotify(&spotify_track());
         tags.genres = vec!["Electro".into()];
+        tags.bpm = Some(123);
+        tags.key = Some("F#m".into());
         // A 1×1 PNG.
         tags.cover = Cover::from_bytes(
             b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\rIDATx\x9cc\xf8\xff\xff?\0\x05\xfe\x02\xfe\xa7\x35\x81\x84\0\0\0\0IEND\xaeB`\x82"
@@ -335,6 +348,8 @@ mod tests {
         );
         assert_eq!(tag.get_string(ItemKey::AlbumArtist), Some("Daft Punk"));
         assert_eq!(tag.track(), Some(4));
+        assert_eq!(tag.get_string(ItemKey::Bpm), Some("123"));
+        assert_eq!(tag.get_string(ItemKey::InitialKey), Some("F#m"));
         assert_eq!(tag.pictures().len(), 1);
     }
 
@@ -355,6 +370,8 @@ mod tests {
         let mut tags = TrackTags::from_spotify(&spotify_track());
         tags.genres = vec!["Electro".into(), "Dance".into()];
         tags.isrc = Some("GBDUW0000059".into());
+        tags.bpm = Some(123);
+        tags.key = Some("F#m".into());
         tags.cover = Cover::from_bytes(vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]);
         tags.write(&mp3, OutputFormat::Mp3 { kbps: 192 }).unwrap();
 
@@ -368,6 +385,8 @@ mod tests {
         );
         assert_eq!(tag.get_string(ItemKey::AlbumArtist), Some("Daft Punk"));
         assert_eq!(tag.get_string(ItemKey::Isrc), Some("GBDUW0000059"));
+        assert_eq!(tag.get_string(ItemKey::IntegerBpm), Some("123"));
+        assert_eq!(tag.get_string(ItemKey::InitialKey), Some("F#m"));
         assert_eq!(tag.track(), Some(4));
         assert_eq!(tag.get_strings(ItemKey::Genre).count(), 2);
         assert_eq!(tag.pictures().len(), 1);
