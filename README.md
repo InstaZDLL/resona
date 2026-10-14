@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL" /></a>
-  <img src="https://img.shields.io/badge/version-0.2.2-2563eb?style=flat-square" alt="Version 0.2.2" />
+  <img src="https://img.shields.io/badge/version-0.3.0-2563eb?style=flat-square" alt="Version 0.3.0" />
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11" />
   <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit%20%2F%2044.1%20kHz-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit / 44.1 kHz" />
   <img src="https://img.shields.io/badge/rust-1.98-orange?style=flat-square&logo=rust" alt="Rust 1.98" />
@@ -88,7 +88,7 @@
 
 ### 🏷️ Tags, covers and lyrics
 
-- **Spotify's catalogue first**: the exact release that played (single, album or compilation), its album artists, track number, release date, copyright and a 640 × 640 cover.
+- **Spotify's catalogue first**: the exact release that played (single, album or compilation), its album artists, track number, release date, copyright, tempo (BPM), musical key and a 640 × 640 cover.
 - **Deezer** completes genre, ISRC and label.
 - **Synced lyrics** from [LRCLIB](https://lrclib.net) written next to each track as `Artist - Title.lrc` (plain lyrics when no timing exists), read by foobar2000, MusicBee, Poweramp, Plexamp…
 - Folders by artist or artist / album, track or recording-order numbers, and tracks you already have are skipped — or replaced, or kept twice.

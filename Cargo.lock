@@ -4304,7 +4304,7 @@ dependencies = [
 
 [[package]]
 name = "resona"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4324,7 +4324,7 @@ dependencies = [
 
 [[package]]
 name = "resona-core"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "claxon",
