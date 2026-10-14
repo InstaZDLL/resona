@@ -6593,8 +6593,8 @@ SOFTWARE.
 ## MIT License
 
 Used by:
-- [resona 0.3.0](https://github.com/InstaZDLL/resona)
-- [resona-core 0.3.0](https://github.com/InstaZDLL/resona)
+- [resona 0.3.1](https://github.com/InstaZDLL/resona)
+- [resona-core 0.3.1](https://github.com/InstaZDLL/resona)
 - [chrono 0.4.45](https://github.com/chronotope/chrono)
 - [dpi 0.1.2](https://github.com/rust-windowing/winit)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
