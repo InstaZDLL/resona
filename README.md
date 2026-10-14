@@ -73,7 +73,7 @@
 ### 🎙️ Recording
 
 - **Spotify's audio only** — WASAPI per-process loopback on the Spotify process tree.
-- **One file per track**, cut on the silence between songs, with the leading and trailing silence trimmed.
+- **One file per track**, cut on the silence between songs. Each file keeps the track's own leading and trailing silence, so it has the catalogue length and synced lyrics stay on time.
 - **FLAC, WAV or MP3** — FLAC and WAV keep the depth of the source (16 or 24-bit), MP3 from 128 to 320 kbps.
 - **A quality badge on every track** — *bit-perfect 16/24-bit*, *peaks limited by Spotify*, *slightly changed by Spotify* or *altered*, from an analysis of every sample.
 - **Incomplete tracks** (joined late, skipped) and very short ones are left out, unless you want them.

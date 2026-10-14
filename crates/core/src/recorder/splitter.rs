@@ -31,6 +31,12 @@ pub const DETAILS_SETTLE: Duration = Duration::from_millis(1500);
 const SNAP_DATED: (Duration, Duration) = (Duration::from_millis(100), Duration::from_millis(100));
 const SNAP_ESTIMATED: (Duration, Duration) =
     (Duration::from_millis(300), Duration::from_millis(300));
+/// Digital silence kept at either end of a track, at most. Spotify's
+/// tracks include their own leading and trailing silence: keeping it gives
+/// the file the catalogue's length and keeps synced lyrics on time
+/// (2026-10-14: trimmed, a file lost up to 1.5 s and its lyrics ran early).
+/// Longer is not part of the track (Spotify idle, the list over).
+const EDGE_SILENCE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -98,11 +104,10 @@ struct Active {
     track: Track,
     frames: u64,
     joined_late: bool,
-    /// Nothing but digital silence written so far (leading silence is
-    /// trimmed).
+    /// The track made a sound: a track that never does leaves no file.
     started: bool,
-    /// Digital silence held back: written if the track goes on, dropped
-    /// if it ends (trailing silence).
+    /// Digital silence held back (frames), written before the next sound
+    /// or, up to [`EDGE_SILENCE`], at either end of the track.
     held_zeros: u64,
 }
 
@@ -110,6 +115,7 @@ pub struct Splitter {
     sample_rate: u32,
     horizon: u64,
     settle: u64,
+    edge_silence: u64,
     /// Held-back audio, interleaved stereo, starting at `buffer_start`.
     buffer: VecDeque<f32>,
     buffer_start: u64,
@@ -125,6 +131,7 @@ impl Splitter {
             sample_rate,
             horizon: frames(HORIZON),
             settle: frames(DETAILS_SETTLE),
+            edge_silence: frames(EDGE_SILENCE),
             buffer: VecDeque::new(),
             buffer_start: 0,
             pending: Vec::new(),
@@ -287,9 +294,15 @@ impl Splitter {
     }
 
     fn end_active(&mut self, actions: &mut Vec<Action>) {
-        if let Some(active) = self.active.take()
+        if let Some(mut active) = self.active.take()
             && active.started
         {
+            // The track's trailing silence.
+            let trailing = active.held_zeros.min(self.edge_silence);
+            if trailing > 0 {
+                actions.push(Action::Write(vec![0.0; (trailing * 2) as usize]));
+                active.frames += trailing;
+            }
             actions.push(Action::End(Ended {
                 track: active.track,
                 frames: active.frames,
@@ -315,9 +328,8 @@ impl Splitter {
             let silent = frame[0] == 0.0 && frame[1] == 0.0;
             if silent {
                 // Paused: Spotify sends digital silence, which is not part
-                // of the track. Otherwise silence is kept only between
-                // sounds (trimmed at both ends).
-                if !self.paused && active.started {
+                // of the track. Otherwise it is the track's own silence.
+                if !self.paused {
                     active.held_zeros += 1;
                 }
                 continue;
@@ -327,6 +339,8 @@ impl Splitter {
                 actions.push(Action::Begin {
                     track: active.track.clone(),
                 });
+                // The track's leading silence.
+                active.held_zeros = active.held_zeros.min(self.edge_silence);
             }
             for _ in 0..active.held_zeros {
                 out.extend_from_slice(&[0.0, 0.0]);
@@ -450,10 +464,11 @@ mod tests {
         run.change(estimate, Change::Content(Content::Track(track("Two"))));
         run.audio(&music(0.2, 5 * SECOND + SECOND / 2));
         let tracks = summary(&run.finish());
-        // No sound of "Two" leaked into "One", none was lost from "Two".
-        assert_eq!(tracks[0].1, vec![0.1]);
-        assert_eq!(tracks[0].2, 5 * SECOND);
-        assert_eq!(tracks[1].2, 6 * SECOND);
+        // No sound of "Two" leaked into "One", none was lost, and the gap
+        // between them is kept.
+        assert_eq!(tracks[0].1, vec![0.1, 0.0]);
+        assert!(!tracks[1].1.contains(&0.1));
+        assert_eq!(tracks[0].2 + tracks[1].2, 11 * SECOND + SECOND / 10);
     }
 
     #[test]
@@ -497,7 +512,9 @@ mod tests {
     }
 
     #[test]
-    fn silence_is_trimmed_at_both_ends_but_kept_inside() {
+    fn the_tracks_own_silence_is_kept() {
+        // Leading, inner and trailing silence are part of the track, as in
+        // Spotify's catalogue length: synced lyrics stay on time.
         let mut run = Run::new();
         run.change(0, Change::Content(Content::Track(track("One"))));
         run.audio(&music(0.0, SECOND));
@@ -506,8 +523,19 @@ mod tests {
         run.audio(&music(0.1, SECOND));
         run.audio(&music(0.0, SECOND));
         let tracks = summary(&run.finish());
-        assert_eq!(tracks[0].1, vec![0.1, 0.0, 0.1]);
-        assert_eq!(tracks[0].2, 3 * SECOND);
+        assert_eq!(tracks[0].1, vec![0.0, 0.1, 0.0, 0.1, 0.0]);
+        assert_eq!(tracks[0].2, 5 * SECOND);
+    }
+
+    #[test]
+    fn long_silence_at_the_ends_is_capped() {
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.audio(&music(0.0, 30 * SECOND));
+        run.audio(&music(0.1, SECOND));
+        run.audio(&music(0.0, 30 * SECOND)); // Spotify idle, not paused
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0].2, SECOND + 2 * EDGE_SILENCE.as_secs() * SECOND);
     }
 
     #[test]
