@@ -46,6 +46,8 @@ pub fn run() -> anyhow::Result<()> {
         .init();
     let settings = Rc::new(RefCell::new(Settings::load()));
     let window = AppWindow::new()?;
+    window.set_version(env!("CARGO_PKG_VERSION").into());
+    window.set_repository(env!("CARGO_PKG_REPOSITORY").into());
     select_language(settings.borrow().language);
     show_settings(&window, &settings.borrow());
 

@@ -260,6 +260,18 @@ msgstr "La télécharger"
 msgid "Check for updates at launch"
 msgstr "Rechercher les mises à jour au lancement"
 
+msgid "About"
+msgstr "À propos"
+
+msgid "Resona {}"
+msgstr "Resona {}"
+
+msgid "Free software under the MIT licence."
+msgstr "Logiciel libre sous licence MIT."
+
+msgid "Source code on GitHub"
+msgstr "Code source sur GitHub"
+
 # Errors
 msgid "⚠ Spotify is not running: start it, then try again."
 msgstr "⚠ Spotify n'est pas lancé : lancez-le, puis réessayez."

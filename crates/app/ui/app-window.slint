@@ -251,6 +251,8 @@ export component AppWindow inherits Window {
     in-out property <int> language-index;
     /// The installed virtual cable, empty if none.
     in property <string> cable-name;
+    in property <string> version;
+    in property <string> repository;
 
     callback toggle-recording();
     callback record-playlist();
@@ -757,6 +759,32 @@ export component AppWindow inherits Window {
                                 text: @tr("Check for updates at launch");
                                 checked <=> root.check-updates;
                                 toggled => { root.settings-changed(); }
+                            }
+                        }
+
+                        if root.settings-tab == 3: Section {
+                            title: @tr("About");
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: @tr("Resona {}", root.version);
+                                    font-weight: 700;
+                                    color: #1d1d1f;
+                                }
+                                Text {
+                                    text: @tr("Free software under the MIT licence.");
+                                    wrap: word-wrap;
+                                    color: #6e6e73;
+                                    font-size: 12px;
+                                }
+                                Text {
+                                    text: @tr("Source code on GitHub");
+                                    color: #0a84ff;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.open-url(root.repository); }
+                                    }
+                                }
                             }
                         }
 
