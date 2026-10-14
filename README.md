@@ -215,7 +215,7 @@ cargo run -p resona-core --example capture_spotify -- 30 capture.flac  # capture
 | [`crates/core`](crates/core) | The engine, no UI: Spotify detection, per-process capture, bit-perfect analysis, track splitting, FLAC / WAV / MP3 encoding, tags, lyrics, playlist sessions |
 | [`crates/app`](crates/app) | The Slint interface, settings, notification area icon |
 
-Design notes and every measurement behind the choices are in [`docs/PLAN.md`](docs/PLAN.md) (in French).
+Design notes and every measurement behind the choices are in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Credits
 

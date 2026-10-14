@@ -46,4 +46,4 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 - **FLAC depth comes from `BitAnalysis::effective_depth`** (`BitDepth::Auto`): 16 when every sample is 16-bit exact, 24 otherwise. Quantization is rounding without dither, valid only at that depth.
 - Code from `E:\Workspace\WaveFlow` may be copied here under MIT only when its sole author is the repo owner — check `git log --format='%an' -- <file>` first (see `docs/PLAN.md`). Copy modules; don't depend on `waveflow-core`.
 
-Docs and user-facing strings are in French; code, comments and this file are in English.
+Everything in the repository is in English: code, comments, docs, release notes and this file. User-facing strings are written in English in `@tr()`; French exists only as a translation in `resona.po`.

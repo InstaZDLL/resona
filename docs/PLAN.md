@@ -1,296 +1,296 @@
-# Resona : plan de réécriture de Spytify en Rust
+# Resona: plan for the Rust rewrite of Spytify
 
-Resona enregistre ce que joue le client Spotify pour Windows, découpe le flux en morceaux, ignore les pubs et écrit les tags. C'est la réécriture de Spytify, en C# / WinForms (`E:\Workspace\spy-spotify`), renommée le 5 octobre 2026. Cette réécriture garde le principe (on enregistre la sortie, on ne télécharge rien) et ajoute le **Lossless de Spotify** (FLAC jusqu'à 24 bits / 44,1 kHz).
+Resona records what the Spotify client for Windows plays, splits the stream into tracks, skips ads and writes tags. It is the rewrite of Spytify, a C# / WinForms app (`E:\Workspace\spy-spotify`), renamed on October 5, 2026. The rewrite keeps the principle (record the output, download nothing) and adds **Spotify Lossless** (FLAC up to 24-bit / 44.1 kHz).
 
-## Décisions prises
+## Decisions made
 
-| Sujet | Choix | Raison |
+| Topic | Choice | Reason |
 | --- | --- | --- |
-| Interface | **Slint 1.18**, rendu logiciel, style Fluent | Mesuré dans `WaveFlow/prototypes/rust_slint_mini` : 10,5 Mo privés contre 78 Mo pour egui. L'appli tourne en fond toute la nuit. Widgets de formulaire prêts, i18n intégrée (`@tr`). |
-| Capture | **WASAPI process loopback** sur l'arbre `Spotify.exe` | Seul le son de Spotify est capturé, sans pilote. Mais la capture passe par la chaîne du périphérique où joue Spotify (fréquence, améliorations, surround) : d'où l'option **câble virtuel** (VB-Cable, non fourni), qui envoie Spotify sur le câble avec l'interface COM non documentée de `Router/AudioRouter.cs` (`core::routing`). |
-| Encodage | Capture dans un WAV float 32 bits temporaire, encodage à la fin du morceau | Le chemin de capture reste simple ; l'encodeur connaît l'analyse complète du morceau (profondeur FLAC). C'est aussi ce que fait la version C#. |
-| Plateforme | Windows uniquement | Spotify desktop + WASAPI. Le code Windows est derrière `#[cfg(windows)]`. |
+| Interface | **Slint 1.18**, software renderer, Fluent style | Measured in `WaveFlow/prototypes/rust_slint_mini`: 10.5 MB private memory against 78 MB for egui. The app runs in the background all night. Form widgets ready, built-in i18n (`@tr`). |
+| Capture | **WASAPI process loopback** on the `Spotify.exe` tree | Only Spotify's sound is captured, with no driver. But the capture goes through the chain of the device Spotify plays on (sample rate, enhancements, surround): hence the **virtual cable** option (VB-Cable, not bundled), which sends Spotify to the cable through the undocumented COM interface of `Router/AudioRouter.cs` (`core::routing`). |
+| Encoding | Capture into a temporary 32-bit float WAV, encode when the track ends | The capture path stays simple; the encoder knows the analysis of the whole track (FLAC depth). It is also what the C# version does. |
+| Platform | Windows only | Spotify desktop + WASAPI. Windows code is behind `#[cfg(windows)]`. |
 
-## Décisions ouvertes
+## Open decisions
 
-- **Version minimale de Windows.** Le process loopback est documenté à partir de Windows 10 build 20348. À vérifier en pratique sur Windows 10 22H2 (build 19045).
-- **API Spotify Web.** Voir [ci-dessous](#api-spotify-web). Proposition : Deezer + Last.fm par défaut, API Spotify en option plus tard.
+- **Minimum Windows version.** Process loopback is documented from Windows 10 build 20348. To check in practice on Windows 10 22H2 (build 19045).
+- **Spotify Web API.** See [below](#spotify-web-api). Proposal: Deezer + Last.fm by default, Spotify API as an option later.
 
-Réglé : le code repris de WaveFlow peut être republié ici sous MIT. Les fichiers concernés (`metadata/deezer.rs`, `lastfm.rs`, `name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs`) n'ont qu'un seul auteur, le propriétaire des deux dépôts. Revérifier avec `git log --format='%an' -- <fichier>` avant de copier un autre fichier.
+Settled: code taken from WaveFlow may be republished here under MIT. The files concerned (`metadata/deezer.rs`, `lastfm.rs`, `name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs`) have a single author, the owner of both repositories. Check again with `git log --format='%an' -- <file>` before copying any other file.
 
 ## Phases
 
-### Phase 0 — Valider la capture (validée le 1er octobre 2026)
+### Phase 0 — Validate the capture (validated October 1, 2026)
 
-Fait : `resona-core::capture` (process loopback), `spotify::find_root_pid`, `analysis::BitAnalysis`, `encode::flac`, et l'exemple :
+Done: `resona-core::capture` (process loopback), `spotify::find_root_pid`, `analysis::BitAnalysis`, `encode::flac`, and the example:
 
 ```powershell
 cargo run -p resona-core --example capture_spotify -- 30 test.flac
 ```
 
-Questions à trancher avec le vrai client :
+Questions to settle with the real client:
 
-1. La capture fonctionne avec `include_tree` sur le processus racine (l'audio est rendu par un processus enfant).
-2. **Volume** : le process loopback capture-t-il avant ou après le volume de session Windows et le volume de Spotify ? Tester 100 % puis 80 %, et regarder `bit-transparent`.
-3. **Fréquence du périphérique** : périphérique par défaut en 48 kHz puis en 44,1 kHz. Spotify ou Windows rééchantillonne-t-il avant nous ?
-4. **Coupure du son pour les pubs** : si on coupe la session audio de Spotify (comme `MainAudioSession` en C#), la capture reçoit-elle encore le son ? Cela décide comment ignorer les pubs.
-5. Pause : que reçoit la capture ?
+1. The capture works with `include_tree` on the root process (the audio is rendered by a child process).
+2. **Volume**: does process loopback capture before or after the Windows session volume and Spotify's volume? Test 100 % then 80 %, and look at `bit-transparent`.
+3. **Device sample rate**: default device at 48 kHz then at 44.1 kHz. Does Spotify or Windows resample before us?
+4. **Muting ads**: if Spotify's audio session is muted (like `MainAudioSession` in C#), does the capture still get the sound? This decides how ads are skipped.
+5. Pause: what does the capture receive?
 
-Mesures du 1er octobre 2026 (Spotify Microsoft Store, casque Logitech PRO X) :
+Measurements of October 1, 2026 (Microsoft Store Spotify, Logitech PRO X headset):
 
-| Point | Résultat |
+| Point | Result |
 | --- | --- |
-| 1. Capture de l'arbre de processus | ✅ 30,0 s capturées, aucune perte (`discontinuities 0`) |
-| 2. Volume | Le volume du périphérique (12 %, −30,7 dB) **n'est pas** dans la capture : on peut écouter à n'importe quel volume. Curseur Spotify au maximum. |
-| 2 bis. Canaux | ✅ Le casque (G HUB, surround virtuel) est un périphérique **7.1**. En stéréo, Windows remixait les 8 canaux : −13 dB et signal recalculé. Corrigé dans le code : capture dans la disposition du périphérique, paire avant gardée (`format::front_stereo`). Les 6 autres canaux sont vides. `RESONA_FORCE_STEREO=1` refait l'ancienne capture. |
-| 2 ter. Effets | ✅ **Cause du traitement restant : « Améliorations audio » de Windows** (*Device Default Effects*) sur le casque. Désactivées : `bit-transparent: yes, source is 16-bit` sur un morceau Lossless 16 bits. Désactiver seulement l'égaliseur G HUB ne suffisait pas : G HUB passe probablement par ces effets. Égaliseur et normalisation de Spotify étaient déjà désactivés (non testés séparément). |
-| 3. Fréquence du périphérique | ✅ **Le périphérique doit être en 44,1 kHz.** En 48 kHz, le flux est rééchantillonné avant la capture (81 % hors grille, écart moyen 0,25 pas). Spotify Lossless ne dépasse jamais 44,1 kHz, donc rien n'est perdu à l'imposer. |
-| 3 bis. Source 24 bits | ⚠ « Heaven » (swim school, Lossless 24 bits) à 44,1 kHz : **presque transparent**. 13,6 % des échantillons sont hors grille 24 bits, avec un écart moyen de 0,02 à 0,09 pas, et la première seconde est parfaite. Analyse (`analyze_wav`) : décalages à **tous les niveaux** (pas un limiteur), **gauche et droite aux mêmes trames** (103 003 contre ~13 600 au hasard), en rafales d'environ 5 trames, d'au plus un demi-pas 24 bits (≈ −144 dBFS). Signature d'un signal quasi nul ajouté à la musique, ou d'un décodage en float. Ce n'est pas un processus enfant à lui seul : exclure chacun ne change rien. Automix désactivé : inchangé. Pas un décodage milieu/côté (21 % seulement de décalages identiques à gauche et à droite, corrélation +0,27). **Conclusion : le traitement 24 bits interne de Spotify.** Le morceau 16 bits était à 0,00 % avec les mêmes réglages et la même chaîne, donc ni Windows ni un flux parasite ne sont en cause. Conséquence : l'export FLAC 24 bits arrondit à l'entier le plus proche, ce qui retrouve exactement la source tant que l'écart reste sous ½ pas. Seuls les écarts d'exactement ½ pas (≈ 4 % des échantillons, passages forts) sont ambigus à 1 pas près. **Statut : 24 bits « quasi transparent ».** Phase 3 : faire distinguer à `BitAnalysis` ce cas (écart max ≤ ½ pas 24 bits) d'un vrai traitement.  À noter : `include_tree: false` de wasapi capture tout **sauf** l'arbre ; Windows n'a pas de mode « ce processus seul ». Un casque limité à 16 bits en sortie n'empêche pas la capture 24 bits. |
-| 4. Coupure du son pour les pubs | À tester (`session_volumes` lit l'état, il faut encore pouvoir couper) |
-| 5. Pause | ⚠ Spotify Store **continue d'envoyer des paquets silencieux** en pause. Le silence n'est plus compté comme « transparent ». |
+| 1. Capture of the process tree | ✅ 30.0 s captured, no loss (`discontinuities 0`) |
+| 2. Volume | The device volume (12 %, −30.7 dB) **is not** in the capture: you can listen at any volume. Spotify slider at maximum. |
+| 2 bis. Channels | ✅ The headset (G HUB, virtual surround) is a **7.1** device. In stereo, Windows remixed the 8 channels: −13 dB and a recomputed signal. Fixed in code: capture in the device's layout, front pair kept (`format::front_stereo`). The 6 other channels are empty. `RESONA_FORCE_STEREO=1` reproduces the old capture. |
+| 2 ter. Effects | ✅ **Cause of the remaining processing: Windows "Audio enhancements"** (*Device Default Effects*) on the headset. Turned off: `bit-transparent: yes, source is 16-bit` on a 16-bit Lossless track. Turning off only the G HUB equalizer was not enough: G HUB probably goes through these effects. Spotify's equalizer and normalization were already off (not tested separately). |
+| 3. Device sample rate | ✅ **The device must run at 44.1 kHz.** At 48 kHz, the stream is resampled before the capture (81 % off the grid, mean deviation 0.25 step). Spotify Lossless never goes above 44.1 kHz, so nothing is lost by enforcing it. |
+| 3 bis. 24-bit source | ⚠ "Heaven" (swim school, 24-bit Lossless) at 44.1 kHz: **almost transparent**. 13.6 % of samples are off the 24-bit grid, with a mean deviation of 0.02 to 0.09 step, and the first second is perfect. Analysis (`analyze_wav`): offsets at **every level** (not a limiter), **left and right on the same frames** (103,003 against ~13,600 by chance), in bursts of about 5 frames, of at most half a 24-bit step (≈ −144 dBFS). Signature of a near-zero signal added to the music, or of decoding in float. Not a child process on its own: excluding each one changes nothing. Automix off: unchanged. Not mid/side decoding (only 21 % identical offsets on left and right, correlation +0.27). **Conclusion: Spotify's internal 24-bit processing.** The 16-bit track was at 0.00 % with the same settings and the same chain, so neither Windows nor a stray stream is involved. Consequence: the 24-bit FLAC export rounds to the nearest integer, which recovers the source exactly as long as the deviation stays under ½ step. Only deviations of exactly ½ step (≈ 4 % of samples, loud passages) are ambiguous by 1 step. **Status: 24-bit "near transparent".** Phase 3: make `BitAnalysis` tell this case (max deviation ≤ ½ 24-bit step) from real processing. Note: wasapi's `include_tree: false` captures everything **except** the tree; Windows has no "this process alone" mode. A headset limited to 16-bit output does not prevent 24-bit capture. |
+| 4. Muting ads | To test (`session_volumes` reads the state, muting is still needed) |
+| 5. Pause | ⚠ Store Spotify **keeps sending silent packets** while paused. Silence is no longer counted as "transparent". |
 
-Diagnostics ajoutés : `audio_setup::default_output_device` (format du périphérique) et `audio_setup::session_volumes` (volume et coupure des sessions Spotify), affichés par `capture_spotify`.
+Diagnostics added: `audio_setup::default_output_device` (device format) and `audio_setup::session_volumes` (volume and mute of Spotify's sessions), shown by `capture_spotify`.
 
-Critère de sortie, **atteint** : un morceau affiché « Lossless 16-bit » par Spotify est capturé bit-transparent et détecté en 16 bits. Restent à éclaircir sans bloquer la suite : le léger écart des sources 24 bits (point 3 bis) et la coupure du son pour les pubs.
+Exit criterion, **met**: a track Spotify shows as "Lossless 16-bit" is captured bit-transparent and detected as 16-bit. Still to clarify without blocking what follows: the slight deviation of 24-bit sources (point 3 bis) and muting for ads.
 
-### Phase 1 — Détection de Spotify (en cours)
+### Phase 1 — Spotify detection (in progress)
 
-Fait :
+Done:
 
-- `spotify::process` : processus racine et liste des PID.
-- `spotify::window` : titre de la fenêtre Chromium, même si elle est masquée dans la zone de notification.
-- `spotify::smtc` : session SMTC.
-- `spotify::title` : analyse du titre, avec les cas des tests C#.
-- `spotify::state` : combine titre, SMTC et activité audio, puis calcule les événements.
-- `spotify::monitor` : thread qui interroge toutes les 500 ms.
-- Exemple `spotify_probe` pour observer Spotify en direct.
+- `spotify::process`: root process and list of PIDs.
+- `spotify::window`: title of the Chromium window, even when hidden in the notification area.
+- `spotify::smtc`: SMTC session.
+- `spotify::title`: title parsing, with the cases of the C# tests.
+- `spotify::state`: combines title, SMTC and audio activity, then computes events.
+- `spotify::monitor`: thread polling every 500 ms.
+- `spotify_probe` example to watch Spotify live.
 
-Constaté le 1er octobre 2026 avec la version Microsoft Store de Spotify :
+Observed on October 1, 2026 with the Microsoft Store version of Spotify:
 
-- Le processus s'appelle bien `Spotify.exe`. L'identifiant SMTC est `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify` (`Spotify.exe` attendu pour l'installateur classique, non vérifié).
-- En pause, le titre de fenêtre repasse à `Spotify Premium`, mais **SMTC garde le morceau** (titre, artiste, album, n° de piste, durée, position) avec `playing: false`. `state::classify` s'en sert : une pause n'émet que `PlayStateChanged`, plus de faux changement de morceau.
-- Au changement de morceau, le titre de fenêtre change en premier ; SMTC suit au poll suivant, et **pas d'un bloc** : la durée du morceau suivant a été vue à côté du titre précédent.
+- The process is indeed called `Spotify.exe`. The SMTC id is `SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify` (`Spotify.exe` expected for the classic installer, not checked).
+- When paused, the window title goes back to `Spotify Premium`, but **SMTC keeps the track** (title, artist, album, track number, duration, position) with `playing: false`. `state::classify` uses this: a pause only emits `PlayStateChanged`, no more false track change.
+- On a track change, the window title changes first; SMTC follows at the next poll, and **not all at once**: the next track's duration was seen next to the previous title.
 
-Reste à faire :
+To do:
 
-- Observer avec `spotify_probe` : une pub (compte Free), un podcast, l'installateur classique (non Store).
-- Brancher `audio_active` sur la capture (phase 2).
+- Watch with `spotify_probe`: an ad (Free account), a podcast, the classic (non-Store) installer.
+- Wire `audio_active` to the capture (phase 2).
 
-Comportement initial à porter depuis `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs` et `SpotifyHandler.cs` :
+Initial behaviour to port from `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs` and `SpotifyHandler.cs`:
 
-- Titre de la fenêtre principale de l'arbre Spotify (`EnumWindows` + PID) ; `Spotify`, `Spotify Free` ou `Spotify Premium` = en veille ou en pub, sinon `Artiste - Titre`.
-- Événements : changement de morceau, lecture/pause, position.
-- Étudier SMTC (`GlobalSystemMediaTransportControlsSessionManager`) : artiste, titre, album et durée sans analyser le titre. Garder le titre de fenêtre en secours, en particulier pour reconnaître les pubs.
-- Reprendre les cas de `EspionSpotify.Tests/SpotifyStatusTests.cs` et `SpotifyProcessTests.cs`.
-- `EspionSpotify.FakeSpotify` produit un faux `Spotify.exe`. Il est reconnu par `find_root_pid` et reste utile pour tester sans le vrai client.
+- Title of the main window of the Spotify tree (`EnumWindows` + PID); `Spotify`, `Spotify Free` or `Spotify Premium` = idle or ad, otherwise `Artist - Title`.
+- Events: track change, play/pause, position.
+- Study SMTC (`GlobalSystemMediaTransportControlsSessionManager`): artist, title, album and duration without parsing the title. Keep the window title as a fallback, in particular to recognize ads.
+- Take over the cases of `EspionSpotify.Tests/SpotifyStatusTests.cs` and `SpotifyProcessTests.cs`.
+- `EspionSpotify.FakeSpotify` produces a fake `Spotify.exe`. It is recognized by `find_root_pid` and stays useful to test without the real client.
 
-### Phase 2 — Moteur d'enregistrement (en cours)
+### Phase 2 — Recording engine (in progress)
 
-Fait, dans `recorder/` :
+Done, in `recorder/`:
 
-- `splitter` (pur, testé) : l'audio est retenu 3 s avant d'être écrit, et chaque changement est placé à l'échantillon où il a eu lieu, dans le passé. La coupure est recalée sur le silence le plus proche (±300 ms d'après le titre, ±100 ms quand SMTC a daté le début). Pause : le silence numérique est ignoré et le fichier continue. Pubs et inactivité ne sont pas écrites. Silence coupé aux deux extrémités, gardé à l'intérieur. Détails SMTC reçus moins de 1,5 s avant une coupure ignorés.
-- `clock` : correspondance instant ↔ échantillon, sans extrapoler à travers une pause sans paquets.
-- `naming` : `Artiste - Titre.flac`, caractères interdits remplacés, noms réservés évités, doublons numérotés.
-- `engine` (Windows) : capture + moniteur + découpeur, un WAV temporaire par morceau dans `.resona-tmp`, encodage FLAC sur un thread à part, profondeur choisie par `analysis::Fidelity`. Reprise automatique de la capture si Spotify redémarre. Morceaux partiels (rejoints en cours, sautés) et trop courts écartés par défaut.
-- `monitor` envoie des événements horodatés, plus `TrackStart` : le début du morceau daté par la position SMTC et l'heure de sa mise à jour.
-- Exemple `record` : `cargo run -p resona-core --example record -- <dossier> [minutes] [--keep-partial]`.
+- `splitter` (pure, tested): audio is held back 3 s before being written, and each change is placed at the sample where it happened, in the past. The cut is moved to the nearest silence (±300 ms from the title, ±100 ms when SMTC dated the start). Pause: digital silence is ignored and the file goes on. Ads and idle time are not written. Silence trimmed at both ends, kept inside. SMTC details received less than 1.5 s before a cut are ignored.
+- `clock`: instant ↔ sample mapping, without extrapolating across a pause with no packets.
+- `naming`: `Artist - Title.flac`, forbidden characters replaced, reserved names avoided, duplicates numbered.
+- `engine` (Windows): capture + monitor + splitter, one temporary WAV per track in `.resona-tmp`, FLAC encoding on a separate thread, depth chosen by `analysis::Fidelity`. Capture resumes automatically if Spotify restarts. Partial tracks (joined midway, skipped) and too-short ones discarded by default.
+- `monitor` sends timestamped events, plus `TrackStart`: the start of the track dated by the SMTC position and the time of its update.
+- `record` example: `cargo run -p resona-core --example record -- <folder> [minutes] [--keep-partial]`.
 
-Premier essai réel (1er octobre 2026) :
+First real run (October 1, 2026):
 
-- Enchaînements et morceaux partiels corrects (rejoint en cours, interrompu à l'arrêt).
-- **Pause prise pour une pub** : le fondu de sortie de Spotify s'entend encore au poll suivant. Corrigé dans `state::classify` : titre de veille + SMTC en pause sur le même morceau = pause, même avec du son.
-- **Tout enregistré « PROCESSED »**, sur toute la durée (99,4 % hors grille 16 bits d'après `analyze_flac`) : les **améliorations audio étaient réactivées** (*Device Default Effects*, effet « Logitech HX2E Surround Sound Effect »), probablement par G HUB, alors qu'une capture précédente les montrait sur Off. **Détection fiable**, vérifiée dans les deux sens le 1er octobre 2026 : lire `MMDevices\Audio\Render\{id}\FxProperties` dans le registre. Un effet est installé (`{d04e05a6…},1/2/5/6/7`) et `Disable_SysFx` (`{1da5d803…},5`) ≠ 1 ; Windows **supprime** cette valeur quand on choisit *Device Default Effects*. L'API `IMMDevice::OpenPropertyStore` ne voit pas ces valeurs (toujours `VT_EMPTY`). `RecorderEvent::CaptureStarted` porte le périphérique et ses `lossless_issues()`.
-- Deuxième essai, effets désactivés : **pause correcte** (un seul fichier) et durées justes à 1 s près (silence retiré aux extrémités). Slow et Heaven (24 bits) : quasi transparents. PLAIINS (16 bits) : bit-perfect. Tell Me I'm Wrong (16 bits) : propre sauf le fondu de la pause (0:21-0:22) et trois rafales de ~200 échantillons. **Modern Dinosaur (16 bits) : limiteur** : 35,5 % d'échantillons modifiés là où le niveau local est à moins de 3 dB du maximum, aucun en dessous (`analyze_flac`). Tell Me, aussi fort, n'est pas touché. À trancher : effet du morceau précédent (Slow, 24 bits, enchaîné) ou propre au morceau.
-- **Modern Dinosaur, lancé à la main** : toujours limité (2 premières secondes exactes, puis jusqu'à 58 % d'échantillons modifiés dans les passages forts). **C'est propre au morceau**, pas à l'enchaînement. Nouvelle classe `Fidelity::PeakLimited` : écarts uniquement dans les blocs de 10 ms à moins de 3 dB du maximum, et au moins 1 s de passages plus calmes intacts. Écrit en 24 bits.
-- Troisième essai (phase 4) : tags Deezer trouvés pour les trois morceaux complets. **Le registre s'est contredit** : `Disable_SysFx` absent (donc « actif ») alors que Windows affichait Off, et Tell Me I'm Wrong sortait intact (610 échantillons sur 17,8 M). La lecture du registre n'est donc qu'un **indice** (« peuvent être actives ») ; le verdict, c'est la `Fidelity` de chaque morceau. `BitPerfect` tolère désormais 1 échantillon sur 10 000 modifié (micro-fondus de Spotify) et les compte (`touched`) ; `PeakLimited` exige ≥ 0,1 % des crêtes modifiées.
-- À faire : revérifier ce réglage pendant une session (G HUB peut le réactiver en cours de route), et vérifier si le changer s'applique au flux déjà ouvert par Spotify ou s'il faut le redémarrer. Le câble virtuel (phase 5) rend ce point sans objet quand il est utilisé.
-- Réglé : un fondu de pause ou de reprise modifie quelques centaines d'échantillons. `Fidelity::BitPerfect { touched }` les tolère (au plus 1 sur `TOUCHED_RATIO` = 10 000) : le morceau reste « bit-perfect » à sa profondeur d'origine, ces échantillons étant arrondis.
+- Transitions and partial tracks correct (joined midway, interrupted at stop).
+- **Pause taken for an ad**: Spotify's fade-out can still be heard at the next poll. Fixed in `state::classify`: idle title + SMTC paused on the same track = pause, even with sound.
+- **Everything recorded "PROCESSED"**, over the whole length (99.4 % off the 16-bit grid according to `analyze_flac`): the **audio enhancements had been turned back on** (*Device Default Effects*, "Logitech HX2E Surround Sound Effect"), probably by G HUB, while an earlier capture showed them Off. **Reliable detection**, checked both ways on October 1, 2026: read `MMDevices\Audio\Render\{id}\FxProperties` in the registry. An effect is installed (`{d04e05a6…},1/2/5/6/7`) and `Disable_SysFx` (`{1da5d803…},5`) ≠ 1; Windows **deletes** this value when *Device Default Effects* is chosen. The `IMMDevice::OpenPropertyStore` API does not see these values (always `VT_EMPTY`). `RecorderEvent::CaptureStarted` carries the device and its `lossless_issues()`.
+- Second run, effects off: **correct pause** (a single file) and durations right to within 1 s (silence removed at the ends). Slow and Heaven (24-bit): near transparent. PLAIINS (16-bit): bit-perfect. Tell Me I'm Wrong (16-bit): clean except the pause fade (0:21-0:22) and three bursts of ~200 samples. **Modern Dinosaur (16-bit): limiter**: 35.5 % of samples changed where the local level is within 3 dB of the maximum, none below (`analyze_flac`). Tell Me, just as loud, is untouched. To settle: an effect of the previous track (Slow, 24-bit, chained) or specific to the track.
+- **Modern Dinosaur, started by hand**: still limited (first 2 seconds exact, then up to 58 % of samples changed in loud passages). **It is specific to the track**, not to the transition. New class `Fidelity::PeakLimited`: deviations only in 10 ms blocks within 3 dB of the maximum, and at least 1 s of quieter passages intact. Written in 24-bit.
+- Third run (phase 4): Deezer tags found for the three complete tracks. **The registry contradicted itself**: `Disable_SysFx` missing (so "active") while Windows showed Off, and Tell Me I'm Wrong came out intact (610 samples out of 17.8 M). Reading the registry is therefore only a **hint** ("may be active"); the verdict is each track's `Fidelity`. `BitPerfect` now tolerates 1 changed sample in 10,000 (Spotify's micro-fades) and counts them (`touched`); `PeakLimited` requires ≥ 0.1 % of peaks changed.
+- To do: check this setting again during a session (G HUB can turn it back on midway), and check whether changing it applies to the stream Spotify already opened or whether Spotify must be restarted. The virtual cable (phase 5) makes this moot when used.
+- Settled: a pause or resume fade changes a few hundred samples. `Fidelity::BitPerfect { touched }` tolerates them (at most 1 in `TOUCHED_RATIO` = 10,000): the track stays "bit-perfect" at its original depth, these samples being rounded.
 
-À vérifier avec le vrai client : la précision des coupures (début et fin de chaque fichier), pause/reprise, saut de morceau, fermeture de Spotify pendant l'enregistrement, changement de périphérique de sortie en cours de session (la disposition des canaux est lue au démarrage de la capture).
+To check with the real client: accuracy of the cuts (start and end of each file), pause/resume, skipping a track, closing Spotify during a recording, changing the output device mid-session (the channel layout is read when the capture starts).
 
-Plan initial :
+Initial plan:
 
-Porter `Watcher.cs`, `Recorder.cs` et `AudioSessions/AudioThrottler.cs` :
+Port `Watcher.cs`, `Recorder.cs` and `AudioSessions/AudioThrottler.cs`:
 
-- Machine à états : morceau courant, changement → finaliser le morceau précédent et démarrer le suivant.
-- **Pause / reprise** : le moniteur n'émet que `PlayStateChanged` (le contenu reste le même morceau). Le recorder continue le même fichier. Une pause suivie d'un saut de morceau donne bien un changement.
-- **Métadonnées SMTC** : garder les `DetailsUpdated` restés stables (au moins deux polls), pas les derniers reçus juste avant le changement de morceau, qui peuvent mélanger deux morceaux.
-- `audio_active` du moniteur : vrai quand la capture reçoit des paquets **non silencieux** (Spotify Store envoie du silence en pause). C'est ce qui révèle une pub derrière un titre « Spotify Free ».
-- Tampon de pré-écoute (`AudioCircularBuffer`) pour ne pas perdre le début d'un morceau détecté en retard. Le titre change environ 500 ms après le son. Ring buffer `rtrb`, comme le moteur audio de WaveFlow.
-- Suppression du silence au début et à la fin (`SilenceAnalyzer`), durée minimale, morceaux déjà enregistrés ignorés, numéros d'ordre, nommage et dossiers (`Native/FileManager.cs`, tests `FileManagerTests.cs`).
-- Pubs : selon le point 4 de la phase 0.
+- State machine: current track, change → finalize the previous track and start the next one.
+- **Pause / resume**: the monitor only emits `PlayStateChanged` (the content stays the same track). The recorder continues the same file. A pause followed by a skip does give a change.
+- **SMTC metadata**: keep the `DetailsUpdated` that stayed stable (at least two polls), not the last ones received just before the track change, which may mix two tracks.
+- Monitor `audio_active`: true when the capture receives **non-silent** packets (Store Spotify sends silence while paused). This is what reveals an ad behind a "Spotify Free" title.
+- Pre-roll buffer (`AudioCircularBuffer`) so as not to lose the start of a track detected late. The title changes about 500 ms after the sound. `rtrb` ring buffer, like WaveFlow's audio engine.
+- Silence removal at start and end (`SilenceAnalyzer`), minimum duration, already-recorded tracks skipped, order numbers, naming and folders (`Native/FileManager.cs`, tests `FileManagerTests.cs`).
+- Ads: depending on point 4 of phase 0.
 
-### Phase 3 — Formats de sortie (fait)
+### Phase 3 — Output formats (done)
 
-- `RecorderConfig::format` (`OutputFormat`) : `Flac { depth }`, `Wav { depth }` (PCM entier), `Mp3 { kbps }` (CBR 128/160/192/256/320). `BitDepth::Auto` reprend la profondeur que la capture contient (`Fidelity::lossless_depth`).
-- `encode::Quantizer` : arrondi exact à profondeur égale, **dither TPDF** quand on réduit (source 24 bits écrite en 16).
-- `encode::mp3` : LAME via `mp3lame-encoder` (compilé depuis les sources, sans DLL), qualité maximale ; l'en-tête **Info** de LAME est réécrit en tête de fichier, pour la lecture sans blanc entre morceaux.
-- Tags : Vorbis pour le FLAC, **ID3v2** pour MP3 et WAV (`TrackTags::write`), pochette comprise.
-- Exemple `record --format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>`.
+- `RecorderConfig::format` (`OutputFormat`): `Flac { depth }`, `Wav { depth }` (integer PCM), `Mp3 { kbps }` (CBR 128/160/192/256/320). `BitDepth::Auto` keeps the depth the capture holds (`Fidelity::lossless_depth`).
+- `encode::Quantizer`: exact rounding at equal depth, **TPDF dither** when reducing (24-bit source written as 16-bit).
+- `encode::mp3`: LAME through `mp3lame-encoder` (built from source, no DLL), maximum quality; LAME's **Info** header is rewritten at the start of the file, for gapless playback.
+- Tags: Vorbis for FLAC, **ID3v2** for MP3 and WAV (`TrackTags::write`), cover art included.
+- `record --format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>` example.
 
-Plan initial :
+Initial plan:
 
-- WAV : `hound`.
-- MP3 CBR 128 à 320 kbps : `mp3lame-encoder` (LAME, comme la version C#).
-- FLAC : fait. Ajouter un dither TPDF quand l'utilisateur force 16 bits sur une source 24 bits.
-- Diagnostic des 6 et 7 octobre 2026 : l'absence de `SEEKTABLE` n'était pas la cause du seek impossible (un FLAC Sidify valide n'en contient pas non plus). Les modes prédictifs de `flacenc` 0.5.1 ont produit sur des captures 24 bits des trames de 33 à 302 Mo, parfois indécodables. La v0.2.0 a désactivé ces modes et ajouté un index, mais PotPlayer revient encore à 00:00 sur « Mujo - Jazz Wizzard », même après remuxage sans tags ni index. Le même PCM réencodé par FFmpeg ou libFLAC se cherche correctement à 1:01 ; son empreinte SHA-256 décodée reste identique. L'encodeur utilise maintenant libFLAC en liaison statique. `scripts/repair-flac-seektable.ps1` ajoute seulement l'index aux anciens fichiers ; il ne répare pas leurs trames audio.
+- WAV: `hound`.
+- MP3 CBR 128 to 320 kbps: `mp3lame-encoder` (LAME, like the C# version).
+- FLAC: done. Add TPDF dither when the user forces 16-bit on a 24-bit source.
+- Diagnosis of October 6 and 7, 2026: the missing `SEEKTABLE` was not why seeking failed (a valid Sidify FLAC has none either). `flacenc` 0.5.1's predictive modes produced 33 to 302 MB frames on 24-bit captures, sometimes undecodable. v0.2.0 turned these modes off and added an index, but PotPlayer still jumps back to 00:00 on "Mujo - Jazz Wizzard", even after remuxing without tags or index. The same PCM re-encoded by FFmpeg or libFLAC seeks correctly to 1:01; its decoded SHA-256 stays identical. The encoder now uses libFLAC, statically linked. `scripts/repair-flac-seektable.ps1` only adds the index to old files; it does not repair their audio frames.
 
-### Phase 4 — Tags et métadonnées (en cours)
+### Phase 4 — Tags and metadata (in progress)
 
-Fait, dans `metadata/` :
+Done, in `metadata/`:
 
-- `deezer` : client bloquant repris de WaveFlow (gestion des refus dans le corps de la réponse, limite de débit), avec morceau, album et pochette. **La recherche avancée `artist:"…" track:"…"` ne renvoie plus rien** (vérifié le 1er octobre 2026) : recherche en texte libre, puis sélection stricte.
-- `lookup` (pur, testé) : un résultat n'est retenu que si le titre (≥ 0,85, featuring ignoré), l'artiste (un de ceux listés par Spotify) et la durée (±3 s) concordent ; l'album départage. Un remix ou un live est rejeté. Mieux vaut des tags incomplets que faux.
-- `name_match` : repris de WaveFlow, avec `title_similarity`.
-- `tags` : `TrackTags` construit depuis Spotify et SMTC, complété par Deezer (album, artiste de l'album, piste/total, disque, date, genres, ISRC, label, pochette XL). Écrit via le tag concret `VorbisComments` de lofty.
-- Moteur : FLAC encodé et tagué dans `.resona-tmp`, puis déplacé dans le dossier final. `RecorderEvent::Saved` indique l'origine des tags (`TagsOutcome`).
-- Exemple `tag_lookup "Artiste" "Titre" ["Album"] [secondes]`.
+- `deezer`: blocking client taken from WaveFlow (refusals in the response body, rate limit), with track, album and cover art. **The advanced search `artist:"…" track:"…"` no longer returns anything** (checked October 1, 2026): free-text search, then strict selection.
+- `lookup` (pure, tested): a result is kept only if the title (≥ 0.85, featuring ignored), the artist (one of those Spotify lists) and the duration (±3 s) agree; the album breaks ties. A remix or a live version is rejected. Incomplete tags are better than wrong ones.
+- `name_match`: taken from WaveFlow, with `title_similarity`.
+- `tags`: `TrackTags` built from Spotify and SMTC, completed by Deezer (album, album artist, track/total, disc, date, genres, ISRC, label, XL cover art). Written through lofty's concrete `VorbisComments` tag.
+- Engine: FLAC encoded and tagged in `.resona-tmp`, then moved to the final folder. `RecorderEvent::Saved` tells where the tags came from (`TagsOutcome`).
+- `tag_lookup "Artist" "Title" ["Album"] [seconds]` example.
 
-Vérifié en réel : Tell Me I'm Wrong, Modern Dinosaur, Heaven et Waterfalls (feat.) trouvés, avec ISRC, label, genres et pochette.
+Checked for real: Tell Me I'm Wrong, Modern Dinosaur, Heaven and Waterfalls (feat.) found, with ISRC, label, genres and cover art.
 
-Reste : Last.fm en secours (clé API), MP3 (ID3v2) avec la phase 3, réglage pour désactiver la recherche en ligne.
+Left: Last.fm as a fallback (API key), MP3 (ID3v2) with phase 3, a setting to turn off online lookup.
 
-Plan initial :
+Initial plan:
 
-- `lofty` : ID3v2 pour le MP3, commentaires Vorbis et image pour le FLAC. Écrire via le tag concret, comme la règle de WaveFlow (`edit::patch_file`), sinon des champs non standards disparaissent.
-- Reprendre de `WaveFlow/src-tauri/crates/core` : `metadata/deezer.rs`, `metadata/lastfm.rs`, `metadata/name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs` (écriture fiable sous Windows : nouvelles tentatives si un antivirus verrouille le fichier). Copier les modules plutôt que dépendre de `waveflow-core`, qui embarque sqlx, symphonia, libopus et wasmtime.
-- Reprendre les cas de `MapperID3Tests.cs`, `LastFMAPITests.cs`.
+- `lofty`: ID3v2 for MP3, Vorbis comments and picture for FLAC. Write through the concrete tag, as WaveFlow's rule says (`edit::patch_file`), otherwise non-standard fields disappear.
+- Take from `WaveFlow/src-tauri/crates/core`: `metadata/deezer.rs`, `metadata/lastfm.rs`, `metadata/name_match.rs`, `album_match.rs`, `artwork/`, `tagio.rs` (reliable writing on Windows: retries if an antivirus locks the file). Copy the modules rather than depend on `waveflow-core`, which pulls in sqlx, symphonia, libopus and wasmtime.
+- Take over the cases of `MapperID3Tests.cs`, `LastFMAPITests.cs`.
 
-### Phase 5 — Interface Slint (en cours)
+### Phase 5 — Slint interface (in progress)
 
-Choix (1er octobre 2026) : **écran unique** (état de Spotify, morceau en cours, bouton, liste des morceaux de la session avec leur qualité) et **panneau latéral de réglages**. Options reprises de la version C# : organisation des fichiers, morceaux déjà enregistrés, pubs, câble virtuel (rajouté le 2 octobre 2026 : il retire le casque de la chaîne enregistrée). Abandonnées : choix libre du périphérique audio, identifiants API Spotify (Deezer), minuterie.
+Choice (October 1, 2026): **a single screen** (Spotify's state, current track, button, list of the session's tracks with their quality) and **a side settings panel**. Options taken from the C# version: file layout, already-recorded tracks, ads, virtual cable (added October 2, 2026: it takes the headset out of the recorded chain). Dropped: free choice of the audio device, Spotify API credentials (Deezer), timer.
 
-Fait côté interface (`crates/app`) :
+Done on the interface side (`crates/app`):
 
-- `ui/app-window.slint` : en-tête, carte « en cours » (état de Spotify, titre, artiste, album, minuteur REC), avertissements, bouton Démarrer/Arrêter, liste de la session avec un badge de qualité par morceau, panneau de réglages qui glisse depuis la droite.
-- Textes en anglais dans `@tr()`, traduits par `translations/fr/LC_MESSAGES/resona.po`, intégré au binaire ; la langue change à chaud.
-- `app.rs` : un moniteur dédié à l'affichage (l'état de Spotify est visible même sans enregistrer), les événements du moteur transmis à la boucle Slint, l'arrêt (qui attend l'encodage du dernier morceau) hors du thread de l'interface, réglages enregistrés à chaque modification, choix du dossier avec `rfd`.
-- `mapping.rs` (pur, testé) : listes de l'interface ↔ réglages.
-- Vérifié le 1er octobre 2026 : fenêtre en français, morceau en cours et changements suivis.
-- Câble virtuel (2 octobre 2026) : `core::routing` lit et change le périphérique de sortie choisi pour Spotify (Paramètres → Mélangeur de volume), interfaces 21H2+ et antérieure ; `audio_setup::spotify_output_device` vérifie ce périphérique-là, et non plus le périphérique par défaut. Réglage « Faire passer Spotify par un câble virtuel » : pendant l'enregistrement seulement, Spotify est envoyé sur « CABLE Input » (rendu à son périphérique par `Drop`, même sur erreur ; une session interrompue est réparée à la suivante). Configuration automatique, sans droits administrateur, par `core::device_config` (`IPolicyConfig`, l'interface du panneau Son) : câble passé en 44,1 kHz (VB-Cable s'installe en 48 kHz, vérifié le 2 octobre 2026), et si l'installateur a fait du câble le périphérique par défaut, alerte avec un bouton pour revenir au vrai périphérique. Option « Entendre Spotify pendant l'enregistrement » (`core::playback`) : l'appli rejoue la capture sur le périphérique par défaut, à la place d'« Écouter ce périphérique » ; désactivée, Spotify enregistre en silence et on peut écouter autre chose. Le pilote n'est pas fourni (licence VB-Audio « all rights reserved »), un lien mène au site. Exemple `route_spotify [cable|default]`. **Mesuré le 3 octobre 2026** : par le câble, casque volontairement en améliorations actives, Oishii et Tell Me I'm Wrong (16 bits) sortent bit-perfect 16 bits, coupures nettes ; yes, and? reste « crêtes limitées » (fichier Spotify). Fausse piste du même jour : une mise à jour de Spotify avait réactivé fondu enchaîné, Automix et normalisation. Symptômes : coupures décalées de 0 à 1,25 s, début et fin de morceau hors grille, tout « incomplet ». D'où `BitAnalysis::fades_in` (2 premières secondes hors grille, le reste beaucoup moins) et l'alerte `SpotifyFades`. Exemples ajoutés : `align_flac` (décalage entre deux enregistrements d'un morceau), `record --cable|--no-cable`.
+- `ui/app-window.slint`: header, "now playing" card (Spotify's state, title, artist, album, REC timer), warnings, Start/Stop button, session list with a quality badge per track, settings panel sliding in from the right.
+- Texts in English in `@tr()`, translated by `translations/fr/LC_MESSAGES/resona.po`, built into the binary; the language changes live.
+- `app.rs`: a monitor dedicated to the display (Spotify's state is visible even when not recording), engine events forwarded to the Slint loop, stopping (which waits for the last track to be encoded) off the UI thread, settings saved on every change, folder picker with `rfd`.
+- `mapping.rs` (pure, tested): interface lists ↔ settings.
+- Checked October 1, 2026: window in French, current track and changes followed.
+- Virtual cable (October 2, 2026): `core::routing` reads and changes the output device chosen for Spotify (Settings → Volume mixer), 21H2+ and earlier interfaces; `audio_setup::spotify_output_device` checks that device, no longer the default device. Setting "Play Spotify through a virtual cable": during recording only, Spotify is sent to "CABLE Input" (given back to its device by `Drop`, even on error; an interrupted session is repaired at the next one). Automatic setup, without administrator rights, through `core::device_config` (`IPolicyConfig`, the Sound panel's interface): cable set to 44.1 kHz (VB-Cable installs at 48 kHz, checked October 2, 2026), and if the installer made the cable the default device, a warning with a button to go back to the real device. Option "Hear Spotify while recording" (`core::playback`): the app plays the capture back on the default device, instead of "Listen to this device"; when off, Spotify records silently and you can listen to something else. The driver is not bundled (VB-Audio licence "all rights reserved"), a link leads to the site. `route_spotify [cable|default]` example. **Measured October 3, 2026**: through the cable, headset deliberately with enhancements on, Oishii and Tell Me I'm Wrong (16-bit) come out bit-perfect 16-bit, clean cuts; yes, and? stays "peaks limited" (Spotify's file). Red herring the same day: a Spotify update had turned crossfade, Automix and normalization back on. Symptoms: cuts shifted by 0 to 1.25 s, start and end of tracks off the grid, everything "partial". Hence `BitAnalysis::fades_in` (first 2 seconds off the grid, the rest much less) and the `SpotifyFades` warning. Examples added: `align_flac` (offset between two recordings of a track), `record --cable|--no-cable`.
 
-Fait le 4 octobre 2026 : pochette du morceau en cours (vignette SMTC, `Smtc::spotify_thumbnail`, décodée par `image` sur un thread à part, relue 0,5 s puis 2 s après chaque changement) ; icône dans la zone de notification (`tray-icon`, menu Afficher / Démarrer-Arrêter / Quitter, rouge pendant l'enregistrement ; fermer la fenêtre pendant un enregistrement la cache au lieu de quitter). Panneau de réglages testé par l'utilisateur.
+Done October 4, 2026: cover art of the current track (SMTC thumbnail, `Smtc::spotify_thumbnail`, decoded by `image` on a separate thread, read again 0.5 s then 2 s after each change); notification area icon (`tray-icon`, menu Show / Start-Stop / Quit, red while recording; closing the window during a recording hides it instead of quitting). Settings panel tested by the user.
 
-Fait côté moteur :
+Done on the engine side:
 
-- `settings` : `Settings` en TOML dans `%APPDATA%\Resona\settings.toml` (écriture atomique, fichier abîmé mis de côté, champs manquants par défaut), `recorder_config()`.
-- `naming` : sous-dossiers (`Folders::Artist`, `ArtistAlbum`, d'après l'artiste de l'album et l'album trouvés par les tags), préfixe (`TrackNumber` « 04 », `OrderNumber` « 001 » dans la session).
-- `library` : index des morceaux déjà présents (parcours récursif au démarrage, clé `Artiste - Titre` sans préfixe ni « (2) »). `ExistingTracks::Skip` (pas écrit du tout, et en option Spotify passe au suivant via SMTC), `Replace`, `KeepBoth`.
-- Pubs : Spotify coupé dans le mélangeur dès qu'une pub est repérée, rétabli ensuite. **À vérifier avec un compte Free** : si la coupure atteint aussi la capture, le début du morceau qui suit la pub pourrait être perdu (le son est rétabli au moment où le changement est remarqué, la coupure est placée plus tôt).
+- `settings`: `Settings` as TOML in `%APPDATA%\Resona\settings.toml` (atomic write, damaged file set aside, missing fields defaulted), `recorder_config()`.
+- `naming`: sub-folders (`Folders::Artist`, `ArtistAlbum`, from the album artist and album found by the tags), prefix (`TrackNumber` "04", `OrderNumber` "001" within the session).
+- `library`: index of the tracks already there (recursive scan at start, key `Artist - Title` without prefix or "(2)"). `ExistingTracks::Skip` (not written at all, and optionally Spotify moves to the next one through SMTC), `Replace`, `KeepBoth`.
+- Ads: Spotify muted in the mixer as soon as an ad is spotted, unmuted afterwards. **To check with a Free account**: if muting also reaches the capture, the start of the track after the ad could be lost (the sound is restored when the change is noticed, the cut is placed earlier).
 
-Plan initial :
+Initial plan:
 
-Porter `frmEspionSpotify` : bouton d'enregistrement, console de logs, réglages (dossier, format, débit, qualité Spotify, profondeur FLAC, durée minimale, options sur les pubs, langue), réduction dans la zone de notification.
+Port `frmEspionSpotify`: record button, log console, settings (folder, format, bitrate, Spotify quality, FLAC depth, minimum duration, ad options, language), minimize to the notification area.
 
-- i18n : `@tr()` + gettext, `fr` et `en`. Remplace les `.resx`, `TranslationKeys` et `I18NKeys`. **Anglais par défaut** (5 octobre 2026) : les textes sources sont en anglais, le français est une traduction (`translations/fr/LC_MESSAGES/resona.po`). Les erreurs passent par `problem::Problem` (une nature, plus la cause technique non traduite) : l'interface les formule dans sa langue (`problem-text`) ; seule la cause technique (Windows, Spotify) reste telle quelle, entre parenthèses.
-- Réglages : un fichier TOML dans `%APPDATA%\Resona`.
+- i18n: `@tr()` + gettext, `fr` and `en`. Replaces the `.resx`, `TranslationKeys` and `I18NKeys`. **English by default** (October 5, 2026): source texts are in English, French is a translation (`translations/fr/LC_MESSAGES/resona.po`). Errors go through `problem::Problem` (a kind, plus the untranslated technical cause): the interface words them in its language (`problem-text`); only the technical cause (Windows, Spotify) stays as is, in parentheses.
+- Settings: a TOML file in `%APPDATA%\Resona`.
 
-### Phase 5 bis — Mode playlist (4 octobre 2026)
+### Phase 5 bis — Playlist mode (October 4, 2026)
 
-On colle un lien de playlist, d'album ou de morceau ; l'appli enregistre toute la liste et s'arrête seule.
+Paste a playlist, album or track link; the app records the whole list and stops on its own.
 
-- **Pilotage par `spotify_cli.exe`**, l'outil en ligne de commande que Spotify livre avec son client (build Microsoft Store 1.3.1.234, alias dans `%LOCALAPPDATA%\Microsoft\WindowsApps`). Réponses JSON, 0,3 s par appel. Testé : `playlist get` lit les playlists **privées** et les albums en entier (150 morceaux d'un coup), `play <uri>` lance la playlist depuis le début, `shuffle off`, `repeat off`, `now-playing`, `lookup --fields duration`. À vérifier : présence dans l'installateur classique de spotify.com.
-- Écartés : la page d'intégration publique (`open.spotify.com/embed/…`, 100 morceaux au plus, 404 sur les playlists privées) ; le suffixe `:play` (ne lance pas la lecture) ; l'automatisation d'interface (Spotify n'expose pas ses boutons) ; l'injection par le port de débogage de Chromium (ce que fait Sidify, fragile et contraire aux conditions de Spotify).
-- `spotify::link` (liens web ou `spotify:`), `spotify::cli` (appels sans fenêtre, délai maximal, analyse JSON testée sur des réponses réelles).
-- `recorder::playlist` (pur, testé) : `Plan` dit, d'après `now-playing`, quoi faire (attendre, lancer le morceau suivant, finir). Fin : un morceau hors de la liste (lecture automatique) ou un retour au début. `entry_for` rattache un enregistrement à son entrée par le titre.
-- `recorder::playlist_session` : aléatoire et répétition coupés, volume de Spotify à 100 %, enregistreur démarré avant la lecture, sondage chaque seconde, pause de Spotify à la fin, bilan des manquants. « Réessayer les manquants » les relance un par un (mode `Tracks`).
-- Interface : champ de lien, liste affichée d'avance (○ en attente), en-tête « nom · fait / total », lien « Réessayer les N manquants ». Exemple `record_playlist <lien>`.
-- Mesuré sur « BEST JP » (privée, 5 morceaux en 16 bits, par le câble) : 5 / 5 enregistrés, pause à l'arrivée de la lecture automatique. 阿修羅ちゃん bit-perfect 16 bits ; ダンスホール et Hi-Five crêtes limitées ; Flow et ヨワネハキ légèrement modifiés (proche de la grille 24 bits) alors qu'ils sont en 16 bits : traitement de Spotify lui-même, la même session ayant donné un bit-perfect. Clip vidéo écarté (lecture audio par défaut). L'étiquette « quasi sans perte, 24 bits » devient « légèrement modifié par Spotify ».
-- 14 octobre 2026 (Spotify 1.304.258, `spotify_cli` 1.3.4.258) : réponses inchangées. Le volume réglé avant `play` n'est pas toujours gardé : la session le revérifie à chaque nouveau morceau (`devices list`) et le remet à 100 %.
-- **Titres likés** : `playlist get spotify:user:<nom>:collection` les donne tous (1 284 en 0,7 s), `play` sur la même URI les lance ; `spotify:collection:tracks` échoue pour les deux (« client connection failed »), seul `lookup` l'accepte. Le nom vient de `spotify_cli me`. Liens acceptés : `open.spotify.com/collection/tracks`, `spotify:collection:tracks`, `spotify:user:<nom>:collection`.
-- Presse-papiers : un lien Spotify copié remplit le champ (sondage chaque seconde, seulement quand le texte copié change, jamais pendant un enregistrement). Lu **uniquement quand une fenêtre de Resona est au premier plan** (`GetForegroundWindow`) : jamais en arrière-plan, le presse-papiers pouvant contenir des mots de passe.
+- **Driven by `spotify_cli.exe`**, the command-line tool Spotify ships with its client (Microsoft Store build 1.3.1.234, alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`). JSON answers, 0.3 s per call. Tested: `playlist get` reads **private** playlists and whole albums (150 tracks at once), `play <uri>` starts the playlist from the beginning, `shuffle off`, `repeat off`, `now-playing`, `lookup --fields duration`. To check: whether the classic spotify.com installer ships it.
+- Ruled out: the public embed page (`open.spotify.com/embed/…`, 100 tracks at most, 404 on private playlists); the `:play` suffix (does not start playback); UI automation (Spotify does not expose its buttons); injection through Chromium's debugging port (what Sidify does, fragile and against Spotify's terms).
+- `spotify::link` (web or `spotify:` links), `spotify::cli` (windowless calls, timeout, JSON parsing tested on real answers).
+- `recorder::playlist` (pure, tested): `Plan` says, from `now-playing`, what to do (wait, start the next track, finish). End: a track outside the list (autoplay) or a jump back to the start. `entry_for` ties a recording to its entry by title.
+- `recorder::playlist_session`: shuffle and repeat off, Spotify's volume at 100 %, recorder started before playback, polling every second, Spotify paused at the end, report of the missed ones. "Retry the missed" starts them one by one (`Tracks` mode).
+- Interface: link field, list shown in advance (○ waiting), header "name · done / total", link "Retry the N missed". `record_playlist <link>` example.
+- Measured on "BEST JP" (private, 5 16-bit tracks, through the cable): 5 / 5 recorded, pause when autoplay arrived. 阿修羅ちゃん bit-perfect 16-bit; ダンスホール and Hi-Five peaks limited; Flow and ヨワネハキ slightly changed (close to the 24-bit grid) although they are 16-bit: Spotify's own processing, the same session having produced a bit-perfect one. Music video avoided (audio playback by default). The label "near lossless, 24-bit" becomes "slightly changed by Spotify".
+- October 14, 2026 (Spotify 1.304.258, `spotify_cli` 1.3.4.258): answers unchanged. The volume set before `play` is not always kept: the session checks it again on each new track (`devices list`) and sets it back to 100 %.
+- **Liked Songs**: `playlist get spotify:user:<name>:collection` returns all of them (1,284 in 0.7 s), `play` on the same URI starts them; `spotify:collection:tracks` fails for both ("client connection failed"), only `lookup` accepts it. The name comes from `spotify_cli me`. Links accepted: `open.spotify.com/collection/tracks`, `spotify:collection:tracks`, `spotify:user:<name>:collection`.
+- Clipboard: a copied Spotify link fills the field (polled every second, only when the copied text changes, never during a recording). Read **only while a Resona window is in the foreground** (`GetForegroundWindow`): never in the background, as the clipboard may hold passwords.
 
-### Ce qu'on retient de Sidify (14 octobre 2026)
+### What Sidify taught us (October 14, 2026)
 
-Analyse de Sidify All-In-One 2.6.4 (rétro-ingénierie, `E:\Workspace\sidify\rapport_sidify_recorder_mode.md`).
+Analysis of Sidify All-In-One 2.6.4 (reverse engineering, `E:\Workspace\sidify\rapport_sidify_recorder_mode.md`).
 
-- **Mode « Convert »** : réimplémente l'échange de licence Widevine avec un certificat d'appareil Spotify embarqué, puis déchiffre le flux. Contournement de mesure technique de protection (DMCA, directive 2001/29/CE art. 6) : **exclu définitivement**.
-- **« Record from App »** : DLL Detours injectée dans le processus audio de Spotify, hook de `IAudioRenderClient::GetBuffer`/`ReleaseBuffer`. Le « high speed » fait avaler les tampons N fois plus vite puis rééchantillonne. Exclu : injection, conditions de Spotify, et le rééchantillonnage détruit le bit-perfect.
-- **« Record from Web »** : redirige la sortie de l'appli vers un périphérique virtuel (`Windows.Media.Internal.AudioPolicyConfig`), comme notre câble, mais capture en 16 bits et rééchantillonne : Resona garde le float 32 bits à 44,1 kHz.
-- Suivi du morceau : `r.js` lit chaque seconde l'état interne de React du lecteur web (`__reactFiber$…` → `playerAPIInstance._state`), fragile à chaque mise à jour ; `spotify_cli now-playing` est officiel.
-- Repris : la surveillance du presse-papiers (`start-spotify-listen-clipboard`) et l'enregistrement des titres likés (`get-spotify-library-tracks`).
-- Indice non suivi pour l'instant : `media_handle.exe` a `record_count_down` / `noplay_count_down` ; Sidify lancerait chaque morceau seul et l'enregistrerait pendant sa durée connue. Notre mode `Tracks` fait déjà ça pour « Réessayer les manquants » ; à rendre par défaut si le suivi de playlist (`Mode::Context`) déçoit.
-- À faire : podcasts (`show`, `episode`), que Sidify accepte et que `LinkKind` refuse encore.
+- **"Convert" mode**: reimplements the Widevine licence exchange with an embedded Spotify device certificate, then decrypts the stream. Circumvention of a technical protection measure (DMCA, directive 2001/29/EC art. 6): **ruled out for good**.
+- **"Record from App"**: a Detours DLL injected into Spotify's audio process, hooking `IAudioRenderClient::GetBuffer`/`ReleaseBuffer`. "High speed" makes it swallow buffers N times faster, then resamples. Ruled out: injection, Spotify's terms, and resampling destroys bit-perfect output.
+- **"Record from Web"**: redirects the app's output to a virtual device (`Windows.Media.Internal.AudioPolicyConfig`), like our cable, but captures 16-bit and resamples: Resona keeps 32-bit float at 44.1 kHz.
+- Track following: `r.js` reads the web player's internal React state every second (`__reactFiber$…` → `playerAPIInstance._state`), fragile with every update; `spotify_cli now-playing` is official.
+- Taken over: watching the clipboard (`start-spotify-listen-clipboard`) and recording Liked Songs (`get-spotify-library-tracks`).
+- Hint not followed for now: `media_handle.exe` has `record_count_down` / `noplay_count_down`; Sidify would start each track on its own and record it for its known duration. Our `Tracks` mode already does that for "Retry the missed"; make it the default if following the playlist (`Mode::Context`) disappoints.
+- To do: podcasts (`show`, `episode`), which Sidify accepts and `LinkKind` still refuses.
 
-### Réglages de Spotify et tags exacts (4 octobre 2026)
+### Spotify's settings and exact tags (October 4, 2026)
 
-- `spotify::prefs` lit le fichier `prefs` du compte utilisé en dernier (build Store et installateur classique) : `audio.normalize_v2`, `audio.automix` (absents = activés par défaut), `audio.play_bitrate_enumeration` (5 = Lossless). Alertes au lancement et à chaque début d'enregistrement. Le fondu enchaîné est stocké chez Spotify (`audio.crossfade_migrated_to_ps`) : seule la détection après coup le voit.
-- `metadata::spotify` : tags tirés du catalogue de Spotify par `spotify_cli lookup`, pour la version réellement jouée. Le moteur suit `now-playing` toutes les 2 s (`PlayingWatch`) et donne à chaque enregistrement l'identifiant exact ; la recherche ne sert qu'en secours (elle ne trouve pas toujours la version jouée : 阿修羅ちゃん de l'album 狂言 absent des résultats). Album au nom de SMTC (la CLI romanise : « Kyougen »), artistes de l'album, date, copyright (`COPYRIGHT`, `TCOP`), pochette 640 px, position sur l'album (par identifiant, titre, puis durée unique). Deezer complète genres, ISRC et label. `TagsOutcome { spotify, deezer }`.
+- `spotify::prefs` reads the `prefs` file of the last account used (Store build and classic installer): `audio.normalize_v2`, `audio.automix` (missing = on by default), `audio.play_bitrate_enumeration` (5 = Lossless). Warnings at launch and at the start of each recording. Crossfade is stored on Spotify's side (`audio.crossfade_migrated_to_ps`): only detection after the fact sees it.
+- `metadata::spotify`: tags taken from Spotify's catalogue through `spotify_cli lookup`, for the version actually played. The engine follows `now-playing` every 2 s (`PlayingWatch`) and gives each recording the exact id; search is only a fallback (it does not always find the version played: 阿修羅ちゃん from the album 狂言 missing from the results). Album under SMTC's name (the CLI romanizes: "Kyougen"), album artists, date, copyright (`COPYRIGHT`, `TCOP`), 640 px cover art, position on the album (by id, title, then unique duration). Deezer adds genres, ISRC and label. `TagsOutcome { spotify, deezer }`.
 
-### Paroles (5 octobre 2026)
+### Lyrics (October 5, 2026)
 
-- `metadata::lyrics` : paroles de LRCLIB (lrclib.net, base ouverte, sans clé), recherche exacte (artiste, titre, album, durée) puis recherche libre filtrée sur le titre et la durée (±3 s), synchronisées préférées. Écrites en `.lrc` à côté du fichier (même nom), au mieux ; supprimées avec le fichier en mode « remplacer ». Réglage « Enregistrer les paroles à côté de chaque morceau (.lrc) », coché par défaut ; paroles simples quand LRCLIB n'a pas le minutage ; `RecorderEvent::Saved` dit si elles sont synchronisées, simples, introuvables ou en échec (`LyricsOutcome`) (onglet Fichiers).
-- Mesuré : paroles synchronisées pour yes, and?, Flow et 阿修羅ちゃん (ces deux-là par la recherche libre).
-- Écartés : les paroles de Spotify (Musixmatch, API privée) et le Canvas (API privée, contenu protégé).
+- `metadata::lyrics`: lyrics from LRCLIB (lrclib.net, open database, no key), exact search (artist, title, album, duration) then free search filtered on title and duration (±3 s), synced preferred. Written as `.lrc` next to the file (same name), best effort; deleted with the file in "replace" mode. Setting "Save lyrics next to each track (.lrc)", checked by default; plain lyrics when LRCLIB has no timing; `RecorderEvent::Saved` says whether they are synced, plain, not found or failed (`LyricsOutcome`) (Files tab).
+- Measured: synced lyrics for yes, and?, Flow and 阿修羅ちゃん (those two through the free search).
+- Ruled out: Spotify's lyrics (Musixmatch, private API) and Canvas (private API, protected content).
 
 ### Phase 6 — Distribution
 
-Fait le 5 octobre 2026, en même temps que le renommage en **Resona** :
+Done October 5, 2026, along with the rename to **Resona**:
 
-- Icône (`crates/app/assets`) : disque vert et ondes ; intégrée à l'exécutable (`winresource` dans `build.rs`), à la fenêtre et à la zone de notification (rouge pendant l'enregistrement).
-- `core::update` : dernière release GitHub de `InstaZDLL/resona` (brouillons et préversions ignorés, versions comparées numériquement) ; alerte « Resona X est disponible » avec un lien, réglage « Rechercher les mises à jour au lancement ». Remplace `EspionSpotify.Updater` : c'est l'installateur qui met à jour.
-- Installateur : `cargo packager --release -p resona` (cargo-packager 0.11, NSIS, installation par utilisateur sans droits administrateur, français et anglais) → `target/packager/resona_<version>_x64-setup.exe` (8,5 Mo).
-- CI : `.github/workflows/ci.yml` (fmt, clippy `-D warnings`, tests sur `windows-latest`) et `release.yml` (sur un tag `v*` : version du tag = version de `Cargo.toml`, tests, installateur, release GitHub).
-- Fait le 5 octobre 2026 : dépôt privé `InstaZDLL/resona`, licence MIT, logo et couleurs Resona. Dependabot (`.github/dependabot.yml` : cargo et GitHub Actions chaque lundi, `windows`, `windows-core` et `wasapi` retenus aux correctifs, comme dans WaveFlow). CodeQL (`codeql.yml` : Rust sous Windows et workflows, `security-extended`, à chaque push, pull request, chaque semaine, et avant chaque release) ; le dépôt étant privé, l'envoi vers l'onglet Security est tenté sans bloquer, et le job échoue lui-même s'il trouve quoi que ce soit. La release (`release.yml`) attend la vérification du tag et CodeQL. README refait avec badges et captures (mode démo `RESONA_DEMO`).
-- Signature Authenticode (5 octobre 2026), avec le certificat de WaveFlow (`WaveFlow/secrets/cert.pfx`, auto-signé) : secrets `SIGNTOOL_PFX_BASE64` et `SIGNTOOL_PFX_PASSWORD`. `release.yml` importe le certificat dans le magasin du runner et donne son empreinte à cargo-packager (son mode « commande » découpe sur les espaces, et le chemin de signtool en contient), qui signe `resona.exe`, le programme de désinstallation et l'installateur, horodatés par DigiCert ; une étape vérifie ensuite empreinte et horodatage. Testé le 5 octobre avec un certificat jetable. Auto-signé : statut `UnknownError`, SmartScreen avertit toujours ; un certificat d'une autorité du Trusted Root Program, mis dans les deux secrets, suffira.
-- Licences (5 octobre 2026, avant de rendre le dépôt public) : `THIRD_PARTY_NOTICES.md` (filiation Spytify avec sa notice MIT, fichiers repris de WaveFlow, LAME en LGPL lié statiquement, Slint sous sa licence Royalty-free 2.0 avec son texte) et `THIRD_PARTY_LICENSES.md` (généré par cargo-about 0.9.2 depuis `Cargo.lock`, cible Windows : 323 entrées). Les deux, plus `LICENSE.txt`, sont installés à côté de `resona.exe`. Badge « Made with Slint » dans le README et les notes de version (attribution exigée par la licence de Slint). La CI échoue si le fichier généré n'est plus à jour ; la release le régénère avant l'installateur. La v0.1.0, construite avant, a ces fichiers joints à sa release.
-- Reste : vérifier `spotify_cli` avec l'installateur classique.
+- Icon (`crates/app/assets`): green disc and waves; built into the executable (`winresource` in `build.rs`), the window and the notification area (red while recording).
+- `core::update`: latest GitHub release of `InstaZDLL/resona` (drafts and pre-releases ignored, versions compared numerically); "Resona X is available" warning with a link, setting "Check for updates at launch". Replaces `EspionSpotify.Updater`: the installer does the update.
+- Installer: `cargo packager --release -p resona` (cargo-packager 0.11, NSIS, per-user install without administrator rights, French and English) → `target/packager/resona_<version>_x64-setup.exe` (8.5 MB).
+- CI: `.github/workflows/ci.yml` (fmt, clippy `-D warnings`, tests on `windows-latest`) and `release.yml` (on a `v*` tag: tag version = `Cargo.toml` version, tests, installer, GitHub release).
+- Done October 5, 2026: private repository `InstaZDLL/resona`, MIT licence, Resona logo and colours. Dependabot (`.github/dependabot.yml`: cargo and GitHub Actions every Monday, `windows`, `windows-core` and `wasapi` held to patch releases, as in WaveFlow). CodeQL (`codeql.yml`: Rust on Windows and workflows, `security-extended`, on every push, pull request, weekly, and before each release); the repository being private, the upload to the Security tab is attempted without blocking, and the job fails on its own if it finds anything. The release (`release.yml`) waits for the tag check and CodeQL. README redone with badges and screenshots (`RESONA_DEMO` demo mode).
+- Authenticode signing (October 5, 2026), with WaveFlow's certificate (`WaveFlow/secrets/cert.pfx`, self-signed): secrets `SIGNTOOL_PFX_BASE64` and `SIGNTOOL_PFX_PASSWORD`. `release.yml` imports the certificate into the runner's store and gives its thumbprint to cargo-packager (its "command" mode splits on spaces, and signtool's path has some), which signs `resona.exe`, the uninstaller and the installer, timestamped by DigiCert; a step then checks thumbprint and timestamp. Tested October 5 with a throwaway certificate. Self-signed: status `UnknownError`, SmartScreen still warns; a certificate from a Trusted Root Program authority, put in the two secrets, will be enough.
+- Licences (October 5, 2026, before making the repository public): `THIRD_PARTY_NOTICES.md` (Spytify lineage with its MIT notice, files taken from WaveFlow, LAME under LGPL statically linked, Slint under its Royalty-free 2.0 licence with its text) and `THIRD_PARTY_LICENSES.md` (generated by cargo-about 0.9.2 from `Cargo.lock`, Windows target: 323 entries). Both, plus `LICENSE.txt`, are installed next to `resona.exe`. "Made with Slint" badge in the README and the release notes (attribution required by Slint's licence). CI fails if the generated file is out of date; the release regenerates it before the installer. v0.1.0, built before, has these files attached to its release.
+- Left: check `spotify_cli` with the classic installer.
 
-## Lossless (nouvelle fonctionnalité)
+## Lossless (new feature)
 
-Spotify Lossless : Premium, réglage *Qualité audio → Lossless* dans le client, FLAC jusqu'à 24 bits / 44,1 kHz. Certains morceaux sont des masters 16 bits.
+Spotify Lossless: Premium, *Audio quality → Lossless* setting in the client, FLAC up to 24-bit / 44.1 kHz. Some tracks are 16-bit masters.
 
-Ce que fait Resona :
+What Resona does:
 
-1. Il capture à 44,1 kHz en float 32 bits (`format::CAPTURE_SAMPLE_RATE`), sans rééchantillonnage de notre côté.
-2. `analysis::BitAnalysis` vérifie chaque échantillon : si le signal n'a pas été modifié, chaque valeur float est exactement un entier 16 ou 24 bits. Un seul étage de gain ou de rééchantillonnage fait sortir la quasi-totalité des échantillons de cette grille. Une capture non transparente est donc détectée sur un morceau entier.
-3. Il écrit en FLAC avec `BitDepth::Auto` : 16 bits si la source l'est, 24 bits sinon.
-4. Il indique dans la console, morceau par morceau, si la capture était bit-transparente. Sinon, il donne les réglages à vérifier.
+1. It captures at 44.1 kHz in 32-bit float (`format::CAPTURE_SAMPLE_RATE`), with no resampling on our side.
+2. `analysis::BitAnalysis` checks every sample: if the signal was not changed, each float value is exactly a 16- or 24-bit integer. A single gain or resampling stage pushes almost every sample off this grid. A non-transparent capture is therefore detected over a whole track.
+3. It writes FLAC with `BitDepth::Auto`: 16-bit if the source is, 24-bit otherwise.
+4. It reports in the console, track by track, whether the capture was bit-transparent. If not, it gives the settings to check.
 
-Réglages demandés à l'utilisateur, d'après la phase 0 :
+Settings asked of the user, from phase 0:
 
-- Spotify : qualité **Lossless**, curseur de volume au maximum, *Normaliser le volume* et **égaliseur** désactivés, **crossfade et Automix désactivés** (sinon les fins de morceaux se mélangent, quel que soit le format).
-- Windows : **« Améliorations audio » sur Off** pour le périphérique de sortie (cause vérifiée), **format du périphérique en 44,1 kHz** (vérifié : 48 kHz rééchantillonne), son spatial désactivé, session Spotify à 100 % dans le mélangeur.
-- Pas besoin de toucher au volume Windows ni de repasser un casque 7.1 en stéréo : la capture n'en dépend pas.
+- Spotify: **Lossless** quality, volume slider at maximum, *Normalize volume* and **equalizer** off, **crossfade and Automix off** (otherwise track ends blend, whatever the format).
+- Windows: **"Audio enhancements" Off** for the output device (verified cause), **device format at 44.1 kHz** (verified: 48 kHz resamples), spatial sound off, Spotify session at 100 % in the mixer.
+- No need to touch the Windows volume or to switch a 7.1 headset back to stereo: the capture does not depend on them.
 
-À vérifier par l'appli elle-même (phase 5) :
+For the app itself to check (phase 5):
 
-- `BitAnalysis` sur chaque morceau, avec le diagnostic de `capture_spotify` (`estimate_gain` pour un volume, `grid_residual` pour un effet) traduit en conseil.
-- Lire l'état des améliorations audio avant d'enregistrer (propriété `PKEY_AudioEndpoint_Disable_SysFx` du périphérique) et prévenir l'utilisateur.
-- Piste à étudier : si seul un gain constant gêne (curseur Spotify pas au maximum), diviser par le pas estimé redonne les entiers d'origine exactement. À vérifier bloc par bloc, car le gain peut changer en cours de morceau.
+- `BitAnalysis` on each track, with the `capture_spotify` diagnosis (`estimate_gain` for a volume, `grid_residual` for an effect) turned into advice.
+- Read the state of audio enhancements before recording (the device's `PKEY_AudioEndpoint_Disable_SysFx` property) and warn the user.
+- Idea to study: if only a constant gain is in the way (Spotify slider not at maximum), dividing by the estimated step gives back the original integers exactly. To check block by block, as the gain can change within a track.
 
-Choix d'interface : la qualité Spotify (`format::SpotifyQuality`) est un réglage. *Lossless* propose FLAC Auto par défaut, *Premium* MP3 320, *Free* MP3 160. Les pubs n'existent qu'en Free : la logique pubs ne s'applique pas aux deux autres.
+Interface choice: the Spotify quality (`format::SpotifyQuality`) is a setting. *Lossless* defaults to FLAC Auto, *Premium* to MP3 320, *Free* to MP3 160. Ads only exist in Free: the ad logic does not apply to the other two.
 
-## API Spotify Web
+## Spotify Web API
 
-La version C# (`API/SpotifyAPI.cs`) s'en sert pour deux choses :
+The C# version (`API/SpotifyAPI.cs`) uses it for two things:
 
-- **Lecture en cours** (`GET /me/player`) : morceau exact (ID), position, et `currently_playing_type = "ad"` pour reconnaître les pubs.
-- **Tags** : titre, artistes, numéro de piste et de disque, album, artistes de l'album, date de sortie, pochette 640 px. Les genres d'album sont presque toujours vides.
+- **Now playing** (`GET /me/player`): exact track (ID), position, and `currently_playing_type = "ad"` to recognize ads.
+- **Tags**: title, artists, track and disc number, album, album artists, release date, 640 px cover art. Album genres are almost always empty.
 
-Depuis les changements de février 2026, pour les applis en mode développement :
+Since the February 2026 changes, for apps in development mode:
 
-- le propriétaire de l'appli doit avoir **Premium**, sinon l'appli cesse de fonctionner. Chaque utilisateur crée sa propre appli : les utilisateurs Free, ceux qui ont des pubs, ne peuvent plus du tout s'en servir ;
-- `external_ids` (l'**ISRC**) a été retiré des pistes et des albums, tout comme `label` et `popularity` ;
-- la récupération groupée (`GET /tracks`, `GET /albums`) a été supprimée.
+- the app's owner must have **Premium**, otherwise the app stops working. Each user creates their own app: Free users, the ones with ads, can no longer use it at all;
+- `external_ids` (the **ISRC**) was removed from tracks and albums, as were `label` and `popularity`;
+- batch retrieval (`GET /tracks`, `GET /albums`) was removed.
 
-Ce qui reste utile par rapport aux autres sources :
+What is still useful compared with the other sources:
 
-| Besoin | Sans API Spotify |
+| Need | Without the Spotify API |
 | --- | --- |
-| Artiste, titre, album, position | SMTC (phase 1) |
-| N° de piste et de disque, date, pochette HD, genres, label, ISRC | Deezer, recherche artiste + titre + album (`album_match.rs`) |
-| Reconnaître les pubs | Titre de fenêtre / SMTC (Free uniquement) |
-| Bonne version du morceau (remaster, live, édition) | L'ID Spotify est sans ambiguïté ; Deezer peut se tromper de version. C'est le seul vrai apport. |
+| Artist, title, album, position | SMTC (phase 1) |
+| Track and disc number, date, HD cover art, genres, label, ISRC | Deezer, artist + title + album search (`album_match.rs`) |
+| Recognize ads | Window title / SMTC (Free only) |
+| Right version of the track (remaster, live, edition) | The Spotify ID is unambiguous; Deezer can pick the wrong version. It is the only real gain. |
 
-Décision proposée : ne pas la porter dans la première version. Si des erreurs de version apparaissent en pratique, l'ajouter en option pour les Premium (OAuth PKCE en local, sans secret client).
+Proposed decision: do not port it in the first version. If version mistakes show up in practice, add it as an option for Premium users (local OAuth PKCE, no client secret).
 
-## Correspondance C# → Rust
+## C# → Rust mapping
 
 | C# (`spy-spotify`) | Rust (`resona`) |
 | --- | --- |
 | `Spotify/SpotifyProcess.cs`, `SpotifyStatus.cs`, `SpotifyHandler.cs` | `core::spotify` (phase 1) |
-| `AudioSessions/*`, `Router/*`, `Drivers/*` | `core::capture` (process loopback), `core::routing` (câble virtuel, pilote non fourni) |
+| `AudioSessions/*`, `Router/*`, `Drivers/*` | `core::capture` (process loopback), `core::routing` (virtual cable, driver not bundled) |
 | `Watcher.cs`, `Recorder.cs` | `core::recorder` (phase 2) |
 | `Native/FileManager.cs` | `core::files` (phase 2) |
 | `Recorder.GetMediaFileWriter` (NAudio.Lame) | `core::encode` |
