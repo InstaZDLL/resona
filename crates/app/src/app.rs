@@ -485,6 +485,17 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
                     .collect::<Vec<_>>(),
             );
         }
+        PlaylistEvent::Durations(durations) => {
+            // Only rows still waiting: a recorded one shows its file's length.
+            for (index, duration) in durations.into_iter().enumerate() {
+                if let (Some(duration), Some(mut row)) = (duration, tracks.row_data(index))
+                    && row.state == TrackState::Waiting
+                {
+                    row.length = mapping::length(duration).into();
+                    tracks.set_row_data(index, row);
+                }
+            }
+        }
         PlaylistEvent::Entry { index, state } => {
             LAST_ENTRY.set(Some(index));
             if let Some(mut row) = tracks.row_data(index) {

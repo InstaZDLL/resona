@@ -15,7 +15,7 @@ use super::engine::{Recorder, RecorderConfig, RecorderEvent};
 use super::library::ExistingTracks;
 use super::playlist::{Mode, Plan, Step, entry_for};
 use crate::problem::Problem;
-use crate::spotify::cli::{NowPlaying, SpotifyCli};
+use crate::spotify::cli::{NowPlaying, SpotifyCli, TrackInfo};
 use crate::spotify::link::{LinkKind, SpotifyLink, liked_songs_uri};
 use crate::spotify::title::TrackTitle;
 use crate::{Error, Result};
@@ -70,6 +70,9 @@ pub enum PlaylistEvent {
         index: usize,
         state: EntryState,
     },
+    /// The entries' lengths, by index, once looked up: after playback
+    /// started, as a long list takes seconds (943 tracks: 8 s).
+    Durations(Vec<Option<Duration>>),
     Recorder(Box<RecorderEvent>),
     /// The run is over (list done, stopped, or failed): the entries not
     /// recorded, to try again.
@@ -156,6 +159,8 @@ struct Run<'a> {
     plan: Plan,
     recorder: Option<Recorder>,
     recorder_events: Receiver<RecorderEvent>,
+    /// The entries' lengths, looked up while the list plays.
+    durations: Receiver<HashMap<String, TrackInfo>>,
     events: &'a Sender<PlaylistEvent>,
 }
 
@@ -191,6 +196,7 @@ impl<'a> Run<'a> {
             plan: Plan::new(uris, mode),
             recorder: None,
             recorder_events: crossbeam_channel::never(),
+            durations: crossbeam_channel::never(),
             events,
         })
     }
@@ -221,6 +227,7 @@ impl<'a> Run<'a> {
             self.cli.play(&uri)?;
             self.plan.requested(0, Instant::now());
         }
+        self.durations = self.look_up_durations()?;
         let asked_at = Instant::now();
         // Held until the run ends, however it ends: stops the watch.
         let (seen, _watch) = watch()?;
@@ -232,6 +239,13 @@ impl<'a> Run<'a> {
                     Ok(event) => self.recorder_event(event),
                     Err(_) => return Ok(()),
                 },
+                recv(self.durations) -> infos => {
+                    // Once: a finished lookup leaves a closed channel.
+                    self.durations = crossbeam_channel::never();
+                    if let Ok(infos) = infos {
+                        self.set_durations(&infos);
+                    }
+                }
                 recv(seen) -> playing => {
                     let Ok(playing) = playing else {
                         return Err(Error::LostSpotify);
@@ -258,6 +272,42 @@ impl<'a> Run<'a> {
                 }
             }
         }
+    }
+
+    /// Looks up the lengths the entries lack, on a thread of its own:
+    /// display only, so playback does not wait for it. A failed lookup
+    /// only leaves them unknown.
+    fn look_up_durations(&self) -> Result<Receiver<HashMap<String, TrackInfo>>> {
+        let uris: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|e| e.duration.is_none())
+            .map(|e| e.uri.clone())
+            .collect();
+        if uris.is_empty() {
+            return Ok(crossbeam_channel::never());
+        }
+        let cli = SpotifyCli::find()?;
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        thread::Builder::new()
+            .name("resona-durations".into())
+            .spawn(move || match cli.lookup(&uris) {
+                Ok(infos) => {
+                    let _ = tx.send(infos);
+                }
+                Err(e) => tracing::warn!("track lengths: {e}"),
+            })?;
+        Ok(rx)
+    }
+
+    fn set_durations(&mut self, infos: &HashMap<String, TrackInfo>) {
+        for entry in &mut self.entries {
+            if entry.duration.is_none() {
+                entry.duration = infos.get(&entry.uri).and_then(|i| i.duration);
+            }
+        }
+        let durations = self.entries.iter().map(|e| e.duration).collect();
+        let _ = self.events.send(PlaylistEvent::Durations(durations));
     }
 
     /// Spotify does not always keep the volume set before `play`: checked
@@ -438,13 +488,12 @@ fn load(cli: &SpotifyCli, source: Source) -> Result<(String, Vec<Entry>, Mode)> 
                 .into_iter()
                 .filter(|t| t.is_track())
                 .collect();
-            let uris: Vec<String> = tracks.iter().map(|t| t.uri.clone()).collect();
-            // Durations are for display: a failed lookup only hides them.
-            let mut infos = cli.lookup(&uris).unwrap_or_default();
+            // Lengths come later (`look_up_durations`): a long list takes
+            // seconds to look up, and playback must not wait for them.
             let entries = tracks
                 .into_iter()
                 .map(|track| Entry {
-                    duration: infos.remove(&track.uri).and_then(|i| i.duration),
+                    duration: None,
                     uri: track.uri,
                     title: track.name,
                     artists: track.artists,

@@ -89,6 +89,10 @@ fn main() -> anyhow::Result<()> {
                 RecorderEvent::Error(e) => println!("error: {e}"),
                 _ => {}
             },
+            PlaylistEvent::Durations(durations) => {
+                let known = durations.iter().flatten().count();
+                println!("lengths known for {known} / {} tracks", durations.len());
+            }
             PlaylistEvent::Error(e) => println!("error: {e}"),
             PlaylistEvent::Finished { name, missed } => {
                 println!("{name} done, {} missed", missed.len());
