@@ -237,7 +237,12 @@ impl<'a> Run<'a> {
                         return Err(Error::LostSpotify);
                     };
                     let now = Instant::now();
-                    match self.plan.observe(playing.as_ref(), now) {
+                    let before = self.plan.current();
+                    let step = self.plan.observe(playing.as_ref(), now);
+                    if self.plan.current() != before {
+                        self.keep_full_volume();
+                    }
+                    match step {
                         Step::Wait => {}
                         Step::Play(index) => {
                             self.cli.play(&self.entries[index].uri)?;
@@ -252,6 +257,21 @@ impl<'a> Run<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// Spotify does not always keep the volume set before `play`: checked
+    /// again on each new track, as below 100 % the capture is scaled.
+    fn keep_full_volume(&self) {
+        match self.cli.local_volume() {
+            Ok(Some(volume)) if volume < 100 => {
+                tracing::warn!("Spotify's volume at {volume} %, set back to 100 %");
+                if let Err(e) = self.cli.volume(1.0) {
+                    tracing::warn!("volume 100 %: {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("devices list: {e}"),
         }
     }
 
