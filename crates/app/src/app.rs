@@ -338,6 +338,21 @@ pub fn run() -> anyhow::Result<()> {
         );
     }
 
+    let clipboard_timer = slint::Timer::default();
+    if !crate::demo::active() {
+        let weak = window.as_weak();
+        let mut watch = ClipboardWatch::default();
+        clipboard_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(1),
+            move || {
+                if let Some(window) = weak.upgrade() {
+                    watch.offer_link(&window);
+                }
+            },
+        );
+    }
+
     crate::demo::schedule(&window);
     window.show()?;
     slint::run_event_loop_until_quit()?;
@@ -901,6 +916,53 @@ fn note_processed(notices: &VecModel<Notice>, title: &TrackTitle) {
 
 /// Warns, without blocking the UI, when Spotify's own volume is below
 /// 100 %: the capture is then scaled and never bit-perfect.
+/// Puts a Spotify link the user copies into the playlist field, as Sidify
+/// does. Only a newly copied text counts: clearing the field keeps it clear.
+/// The clipboard is read only while Resona is the foreground window, never
+/// in the background: it may hold anything, passwords included.
+#[derive(Default)]
+struct ClipboardWatch {
+    clipboard: Option<arboard::Clipboard>,
+    last: Option<String>,
+}
+
+impl ClipboardWatch {
+    fn offer_link(&mut self, window: &AppWindow) {
+        if window.get_recording() || !in_foreground() {
+            return;
+        }
+        if self.clipboard.is_none() {
+            self.clipboard = arboard::Clipboard::new().ok();
+        }
+        let Some(text) = self.clipboard.as_mut().and_then(|c| c.get_text().ok()) else {
+            return;
+        };
+        if self.last.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        if SpotifyLink::parse(&text).is_ok() {
+            window.set_playlist_link(text.trim().into());
+        }
+        self.last = Some(text);
+    }
+}
+
+/// The foreground window is one of this process's (the main window or a
+/// dialog of it).
+#[cfg(windows)]
+fn in_foreground() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    let mut pid = 0;
+    // SAFETY: plain Win32 calls; a null window yields 0, never our id.
+    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid)) };
+    pid == std::process::id()
+}
+
+#[cfg(not(windows))]
+fn in_foreground() -> bool {
+    false
+}
+
 fn check_spotify_volume(window: Weak<AppWindow>) {
     thread::spawn(move || {
         let Ok(cli) = SpotifyCli::find() else { return };

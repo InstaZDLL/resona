@@ -131,6 +131,15 @@ impl SpotifyCli {
         parse(&self.run(&["playlist", "get", uri])?)
     }
 
+    /// The logged-in account's user name, the id in its `spotify:user:` URI.
+    pub fn username(&self) -> Result<String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            username: String,
+        }
+        Ok(parse::<Answer>(&self.run(&["me"])?)?.username)
+    }
+
     /// `None` when Spotify has nothing loaded.
     pub fn now_playing(&self) -> Result<Option<NowPlaying>> {
         parse_now_playing(&self.run(&["now-playing"])?)

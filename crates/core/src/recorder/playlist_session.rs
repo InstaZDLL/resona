@@ -16,7 +16,7 @@ use super::library::ExistingTracks;
 use super::playlist::{Mode, Plan, Step, entry_for};
 use crate::problem::Problem;
 use crate::spotify::cli::{NowPlaying, SpotifyCli};
-use crate::spotify::link::{LinkKind, SpotifyLink};
+use crate::spotify::link::{LinkKind, SpotifyLink, liked_songs_uri};
 use crate::spotify::title::TrackTitle;
 use crate::{Error, Result};
 
@@ -428,7 +428,10 @@ fn load(cli: &SpotifyCli, source: Source) -> Result<(String, Vec<Entry>, Mode)> 
             Ok((info.name, vec![entry], Mode::Tracks))
         }
         Source::Link(link) => {
-            let uri = link.uri();
+            let uri = match link.kind {
+                LinkKind::LikedSongs => liked_songs_uri(&cli.username()?),
+                _ => link.uri(),
+            };
             let collection = cli.collection(&uri)?;
             let tracks: Vec<_> = collection
                 .tracks

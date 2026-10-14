@@ -4307,6 +4307,7 @@ name = "resona"
 version = "0.2.1"
 dependencies = [
  "anyhow",
+ "arboard",
  "crossbeam-channel",
  "image",
  "resona-core",
@@ -4317,6 +4318,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "wasapi",
+ "windows",
  "winresource",
 ]
 

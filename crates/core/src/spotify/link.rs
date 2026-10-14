@@ -8,6 +8,8 @@ pub enum LinkKind {
     Playlist,
     Album,
     Track,
+    /// The account's Liked Songs: no id in the link, the account says whose.
+    LikedSongs,
 }
 
 impl LinkKind {
@@ -25,6 +27,7 @@ impl LinkKind {
             Self::Playlist => "playlist",
             Self::Album => "album",
             Self::Track => "track",
+            Self::LikedSongs => "collection",
         }
     }
 }
@@ -39,7 +42,9 @@ pub struct SpotifyLink {
 impl SpotifyLink {
     /// Accepts `https://open.spotify.com/playlist/<id>?si=…` (with or
     /// without a locale segment such as `intl-fr`), `spotify:playlist:<id>`,
-    /// and the same for albums and tracks.
+    /// and the same for albums and tracks. Liked Songs:
+    /// `https://open.spotify.com/collection/tracks`, `spotify:collection:tracks`
+    /// or `spotify:user:<name>:collection`.
     pub fn parse(text: &str) -> Result<Self> {
         let text = text.trim();
         let invalid = || Error::NotASpotifyLink(text.to_owned());
@@ -56,10 +61,21 @@ impl SpotifyLink {
                 .filter(|s| !s.is_empty() && !s.starts_with("intl-"))
                 .collect()
         };
+        if matches!(
+            segments[..],
+            ["collection", "tracks"] | ["user", _, "collection"]
+        ) {
+            return Ok(Self {
+                kind: LinkKind::LikedSongs,
+                id: String::new(),
+            });
+        }
         let [kind, id] = segments[..] else {
             return Err(invalid());
         };
-        let kind = LinkKind::from_segment(kind).ok_or_else(invalid)?;
+        let kind = LinkKind::from_segment(kind)
+            .filter(|&kind| kind != LinkKind::LikedSongs)
+            .ok_or_else(invalid)?;
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
             return Err(invalid());
         }
@@ -69,9 +85,20 @@ impl SpotifyLink {
         })
     }
 
+    /// For Liked Songs, the URI `lookup` takes; `play` and `playlist get`
+    /// need [`liked_songs_uri`] instead.
     pub fn uri(&self) -> String {
-        format!("spotify:{}:{}", self.kind.segment(), self.id)
+        match self.kind {
+            LinkKind::LikedSongs => "spotify:collection:tracks".to_owned(),
+            kind => format!("spotify:{}:{}", kind.segment(), self.id),
+        }
     }
+}
+
+/// The Liked Songs of the account `username`, as `play` and `playlist get`
+/// take them (`spotify:collection:tracks` fails there, 2026-10-14).
+pub fn liked_songs_uri(username: &str) -> String {
+    format!("spotify:user:{username}:collection")
 }
 
 #[cfg(test)]
@@ -96,6 +123,22 @@ mod tests {
         let track = SpotifyLink::parse(" spotify:track:6Si3ppdntTNAEaBUokB4Yv ").unwrap();
         assert_eq!(track.kind, LinkKind::Track);
         assert_eq!(track.id, "6Si3ppdntTNAEaBUokB4Yv");
+    }
+
+    #[test]
+    fn liked_songs() {
+        for text in [
+            "https://open.spotify.com/collection/tracks",
+            "spotify:collection:tracks",
+            "spotify:user:3y3canzd8f1w1bype9a1fqu9u:collection",
+        ] {
+            let link = SpotifyLink::parse(text).unwrap();
+            assert_eq!(link.kind, LinkKind::LikedSongs, "{text}");
+        }
+        assert_eq!(
+            liked_songs_uri("someone"),
+            "spotify:user:someone:collection"
+        );
     }
 
     #[test]
