@@ -4187,7 +4187,7 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 - [hyper-rustls 0.27.10](https://github.com/rustls/hyper-rustls)
-- [rustls 0.23.45](https://github.com/rustls/rustls)
+- [rustls 0.23.46](https://github.com/rustls/rustls)
 
 ```
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
