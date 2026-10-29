@@ -240,10 +240,10 @@ impl Splitter {
                 let (front, back) = self.buffer.as_slices();
                 let held: Vec<f32> = front.iter().chain(back).copied().collect();
                 let search = self.search(&pending);
-                pending.frame = place_cut(&held, self.buffer_start, search)
-                    .frame
-                    .max(self.buffer_start);
-                self.write_until(pending.frame, actions);
+                let cut = place_cut(&held, self.buffer_start, search);
+                self.write_until(cut.frame, actions);
+                self.skip_until(cut.resume);
+                pending.frame = cut.resume.max(self.buffer_start);
             } else {
                 // Applying a playback or details change slightly early is
                 // harmless; writing into a pending cut's search window is not.
@@ -358,6 +358,16 @@ impl Splitter {
                 joined_late: active.joined_late,
             }));
         }
+    }
+
+    /// Drops held-back audio up to `frame`: Spotify's gap between two
+    /// tracks, part of neither.
+    fn skip_until(&mut self, frame: u64) {
+        let count = frame
+            .saturating_sub(self.buffer_start)
+            .min((self.buffer.len() / 2) as u64);
+        self.buffer.drain(..(count * 2) as usize);
+        self.buffer_start += count;
     }
 
     /// Moves held-back audio up to `frame` into the current track.
@@ -591,6 +601,42 @@ mod tests {
         assert_eq!(tracks[0].1, vec![0.1, 0.0]);
         assert_eq!(tracks[0].2, 5 * SECOND + SECOND / 20);
         assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    #[test]
+    fn spotifys_gap_belongs_to_neither_track() {
+        // As measured on 2026-10-29: Spotify plays 500 ms of digital
+        // silence between tracks, and SMTC dates the next one a little
+        // after the gap begins. Two opens with 200 ms of its own silence.
+        let five = Duration::from_secs(5);
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(lasting("One", five))));
+        let dated = |run: &mut Run, name: &str, at: u64| {
+            run.change(
+                at + SECOND / 3,
+                Change::Content(Content::Track(lasting(name, five))),
+            );
+            run.change(
+                at + SECOND,
+                Change::TrackStart {
+                    title: track(name).title,
+                    frame: Some(at),
+                },
+            );
+        };
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 2 + SECOND / 5));
+        run.audio(&music(0.2, SECOND));
+        dated(&mut run, "Two", 5 * SECOND + SECOND / 12);
+        run.audio(&music(0.2, 3 * SECOND + 4 * SECOND / 5));
+        run.audio(&music(0.0, SECOND / 2));
+        run.audio(&music(0.3, SECOND));
+        dated(&mut run, "Three", 10 * SECOND + SECOND / 2 + SECOND / 12);
+        run.audio(&music(0.3, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1], ("Two".into(), vec![0.0, 0.2], 5 * SECOND));
+        assert_eq!(tracks[2].1, vec![0.3]);
     }
 
     #[test]

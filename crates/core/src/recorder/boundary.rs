@@ -4,7 +4,8 @@
 //! noticed it (off by up to a poll interval, or by Spotify's output latency
 //! when SMTC dated it), or, at the end of a track, its start plus the
 //! length SMTC declared. [`place_cut`] looks around that frame for, in
-//! order: a silence; a dip well under the surrounding level, where two
+//! order: the half second of digital silence Spotify plays between two
+//! tracks, which belongs to neither and is left out; a silence; a dip well under the surrounding level, where two
 //! tracks fade or flow into each other; on a skip, the millisecond where
 //! the peak level collapses, the next track's first sample; and otherwise
 //! keeps the frame it was given, the declared length being the best guess
@@ -29,6 +30,12 @@ const PEAK_FRAMES: usize = 44;
 /// On a skip, the next track starts where the peak of a 1 ms window falls
 /// this far under the median of all of them (−20 dB).
 const EDGE_RATIO: f32 = 0.1;
+/// Digital silence Spotify plays between two tracks that are not gapless:
+/// exactly 500 ms (measured 2026-10-29, six transitions out of twelve came
+/// out at 22 050 frames of zeros, the others longer by the tracks' own
+/// silence). Kept, it made every file half a second longer than its
+/// catalogue length.
+const SPOTIFY_GAP: u64 = 22_050;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -54,6 +61,8 @@ pub struct Search {
 /// What placed the cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CutBy {
+    /// Spotify's half second between two tracks, left out.
+    SpotifyGap,
     Silence,
     Dip,
     /// The first sample of the next track, after a skip.
@@ -66,8 +75,22 @@ pub enum CutBy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cut {
+    /// Where the track ends.
     pub frame: u64,
+    /// Where the next one starts: after `frame` when Spotify's gap is
+    /// left out between them.
+    pub resume: u64,
     pub by: CutBy,
+}
+
+impl Cut {
+    fn at(frame: u64, by: CutBy) -> Self {
+        Self {
+            frame,
+            resume: frame,
+            by,
+        }
+    }
 }
 
 /// `samples` is interleaved stereo starting at frame `first_frame`. Only
@@ -78,31 +101,35 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
         first_frame,
     };
     let target = search.target;
-    let fallback = Cut {
-        frame: target,
-        by: match search.kind {
+    let fallback = Cut::at(
+        target,
+        match search.kind {
             Kind::Ending => CutBy::Length,
             Kind::Interrupted => CutBy::Estimate,
         },
-    };
+    );
     let from = search.from.max(first_frame);
     let to = search.to.min(audio.end());
     if to <= from {
         return fallback;
     }
 
+    if let Some((start, end)) = audio.spotify_gap(from, to, target) {
+        // The gap sits between the tracks' own silences, whose share is
+        // unknown: it is placed at the target, as far as the run allows.
+        let frame = target.clamp(start, end - SPOTIFY_GAP);
+        return Cut {
+            frame,
+            resume: frame + SPOTIFY_GAP,
+            by: CutBy::SpotifyGap,
+        };
+    }
     if let Some((rms, at)) = audio.quietest_block(from, to, target) {
         if rms < QUIET_RMS {
-            return Cut {
-                frame: audio.refine(at, target),
-                by: CutBy::Silence,
-            };
+            return Cut::at(audio.refine(at, target), CutBy::Silence);
         }
         if rms <= audio.median_rms(from, to) * DIP_RATIO {
-            return Cut {
-                frame: audio.refine(at, target),
-                by: CutBy::Dip,
-            };
+            return Cut::at(audio.refine(at, target), CutBy::Dip);
         }
     }
     // Only after a skip: at the end of a track, a percussive break would
@@ -111,10 +138,7 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
         && let Some((peak, at, median)) = audio.quietest_peak(from, to, target)
         && peak <= median * EDGE_RATIO
     {
-        return Cut {
-            frame: at,
-            by: CutBy::Edge,
-        };
+        return Cut::at(at, CutBy::Edge);
     }
     fallback
 }
@@ -133,6 +157,38 @@ impl Audio<'_> {
     fn frames(&self, at: u64, frames: usize) -> &[f32] {
         let offset = ((at - self.first_frame) * 2) as usize;
         &self.samples[offset..offset + frames * 2]
+    }
+
+    fn is_silent(&self, at: u64) -> bool {
+        self.frames(at, 1) == [0.0, 0.0]
+    }
+
+    /// The run of digital silence (start, end) at least [`SPOTIFY_GAP`]
+    /// long that meets `from..to`, nearest `target`. The run is followed
+    /// through all the audio held, past the search.
+    fn spotify_gap(&self, from: u64, to: u64, target: u64) -> Option<(u64, u64)> {
+        let mut best: Option<(u64, u64)> = None;
+        let distance = |(start, end): (u64, u64)| target.clamp(start, end).abs_diff(target);
+        let mut at = self.first_frame;
+        while at < self.end() {
+            if !self.is_silent(at) {
+                at += 1;
+                continue;
+            }
+            let start = at;
+            while at < self.end() && self.is_silent(at) {
+                at += 1;
+            }
+            let run = (start, at);
+            if at - start >= SPOTIFY_GAP
+                && start < to
+                && at > from
+                && best.is_none_or(|best| distance(run) < distance(best))
+            {
+                best = Some(run);
+            }
+        }
+        best
     }
 
     fn rms(&self, at: u64) -> f32 {
@@ -261,39 +317,21 @@ mod tests {
     fn a_gap_is_split_at_the_target() {
         let samples = signal(44_100, 20_000..21_000);
         let placed = place_cut(&samples, 0, around(20_300, 4_410, Kind::Ending));
-        assert_eq!(
-            placed,
-            Cut {
-                frame: 20_300,
-                by: CutBy::Silence
-            }
-        );
+        assert_eq!(placed, Cut::at(20_300, CutBy::Silence));
     }
 
     #[test]
     fn keeps_the_estimate_without_a_gap() {
         let samples = signal(44_100, 0..0);
         let placed = place_cut(&samples, 0, around(22_000, 4_410, Kind::Interrupted));
-        assert_eq!(
-            placed,
-            Cut {
-                frame: 22_000,
-                by: CutBy::Estimate
-            }
-        );
+        assert_eq!(placed, Cut::at(22_000, CutBy::Estimate));
     }
 
     #[test]
     fn gapless_cuts_at_the_declared_length() {
         let samples = signal(44_100, 0..0);
         let placed = place_cut(&samples, 0, around(22_000, 8_820, Kind::Ending));
-        assert_eq!(
-            placed,
-            Cut {
-                frame: 22_000,
-                by: CutBy::Length
-            }
-        );
+        assert_eq!(placed, Cut::at(22_000, CutBy::Length));
     }
 
     #[test]
@@ -364,13 +402,43 @@ mod tests {
         assert!((20_000..20_220).contains(&placed.frame), "{placed:?}");
         // At a track's end, the same moment is not trusted as an edge.
         let ending = place_cut(&samples, 0, around(23_000, 13_230, Kind::Ending));
+        assert_eq!(ending, Cut::at(23_000, CutBy::Length));
+    }
+
+    #[test]
+    fn spotifys_gap_is_left_out() {
+        // Between two tracks without silence of their own: the run is the
+        // gap, whatever the estimate.
+        let samples = signal(88_200, 30_000..30_000 + 22_050);
+        let placed = place_cut(&samples, 0, around(30_400, 4_410, Kind::Interrupted));
         assert_eq!(
-            ending,
+            placed,
             Cut {
-                frame: 23_000,
-                by: CutBy::Length
+                frame: 30_000,
+                resume: 52_050,
+                by: CutBy::SpotifyGap
             }
         );
+    }
+
+    #[test]
+    fn spotifys_gap_goes_to_the_target_between_the_tracks_own_silence() {
+        // 300 ms of the tracks' own silence around the gap: it goes where
+        // the declared length ends the first track.
+        let samples = signal(88_200, 30_000..30_000 + 22_050 + 13_230);
+        let placed = place_cut(&samples, 0, around(35_000, 8_820, Kind::Ending));
+        assert_eq!((placed.frame, placed.resume), (35_000, 57_050));
+        // A target past the run's room leaves the gap at its end.
+        let placed = place_cut(&samples, 0, around(48_000, 8_820, Kind::Ending));
+        assert_eq!((placed.frame, placed.resume), (43_230, 65_280));
+    }
+
+    #[test]
+    fn a_short_gap_is_the_tracks_own() {
+        let samples = signal(88_200, 30_000..30_000 + 22_000);
+        let placed = place_cut(&samples, 0, around(30_400, 4_410, Kind::Interrupted));
+        assert_eq!(placed.by, CutBy::Silence);
+        assert_eq!(placed.frame, placed.resume);
     }
 
     #[test]
@@ -384,12 +452,6 @@ mod tests {
     fn a_search_outside_the_audio_keeps_the_target() {
         let samples = signal(4_410, 0..0);
         let placed = place_cut(&samples, 0, around(20_000, 1_000, Kind::Ending));
-        assert_eq!(
-            placed,
-            Cut {
-                frame: 20_000,
-                by: CutBy::Length
-            }
-        );
+        assert_eq!(placed, Cut::at(20_000, CutBy::Length));
     }
 }
