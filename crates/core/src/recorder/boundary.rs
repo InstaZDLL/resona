@@ -141,12 +141,12 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
     if let Some((start, end)) = audio.silence_near(from, to, target, PEAK_FRAMES as u64) {
         return Cut::at(target.clamp(start, end), CutBy::Silence);
     }
+    // A track ending on a noise floor under −60 dBFS moved 64 ms towards
+    // its quietest block; no quiet block, dip or edge at a track's end.
+    if search.kind == Kind::Ending {
+        return fallback;
+    }
     if let Some((rms, at)) = audio.quietest_block(from, to, target) {
-        // A track ending on a noise floor under −60 dBFS moved 64 ms
-        // towards its quietest block.
-        if search.kind == Kind::Ending {
-            return fallback;
-        }
         if rms < QUIET_RMS {
             return Cut::at(audio.refine(at, target), CutBy::Silence);
         }
@@ -154,8 +154,8 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
             return Cut::at(audio.refine(at, target), CutBy::Dip);
         }
     }
-    // Only after a skip (Ending has returned): at the end of a track, a
-    // percussive break would pass for an edge.
+    // Only after a skip: at the end of a track, a percussive break would
+    // pass for an edge.
     if let Some((peak, at, median)) = audio.quietest_peak(from, to, target)
         && peak <= median * EDGE_RATIO
     {
@@ -428,6 +428,16 @@ mod tests {
         });
         let placed = place_cut(&samples, 0, around(19_000, 13_230, Kind::Interrupted));
         assert_eq!(placed, Cut::at(20_000, CutBy::Silence));
+    }
+
+    #[test]
+    fn at_a_tracks_end_a_search_shorter_than_a_block_finds_no_edge() {
+        // Recording stopped 5 ms after the declared end, with audio held
+        // from 3 ms before it: no 10 ms block fits, and the peak collapses
+        // 1 ms after the end.
+        let samples = shaped(370, |f| if f >= 200 { 0.001 } else { 1.0 });
+        let ending = place_cut(&samples, 21_900, around(22_050, 4_410, Kind::Ending));
+        assert_eq!(ending, Cut::at(22_050, CutBy::Length));
     }
 
     #[test]
