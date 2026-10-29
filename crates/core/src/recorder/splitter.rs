@@ -267,7 +267,9 @@ impl Splitter {
                 );
                 self.write_until(cut.frame, actions);
                 self.skip_until(cut.resume);
-                pending.frame = cut.resume.max(self.buffer_start);
+                // Where the next track starts: `cut.resume`, or the end of the
+                // audio held when finishing put the cut past it.
+                pending.frame = self.buffer_start;
             } else {
                 // Applying a playback or details change slightly early is
                 // harmless; writing into a pending cut's search window is not.
