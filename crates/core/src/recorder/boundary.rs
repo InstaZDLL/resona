@@ -34,8 +34,9 @@ const EDGE_RATIO: f32 = 0.1;
 /// exactly 500 ms (measured 2026-10-29, six transitions out of twelve came
 /// out at 22 050 frames of zeros, the others longer by the tracks' own
 /// silence). Kept, it made every file half a second longer than its
-/// catalogue length.
-const SPOTIFY_GAP: u64 = 22_050;
+/// catalogue length. SMTC dates the next track anywhere in it, from its
+/// start to its end.
+pub const SPOTIFY_GAP: u64 = 22_050;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

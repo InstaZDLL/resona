@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use super::boundary::{Kind, Search, place_cut};
+use super::boundary::{Kind, SPOTIFY_GAP, Search, place_cut};
 use crate::spotify::state::{Content, Track};
 use crate::spotify::title::TrackTitle;
 
@@ -255,7 +255,8 @@ impl Splitter {
     }
 
     /// Where to look for the cut of a content change: around the current
-    /// track's end when its length is known and the change agrees with it,
+    /// track's end when its length is known and the change agrees with it
+    /// (SMTC may date the next track as late as the end of Spotify's gap),
     /// around the change otherwise.
     fn search(&self, pending: &Pending) -> Search {
         let (before, after) = if pending.dated {
@@ -268,7 +269,7 @@ impl Splitter {
         let reach = self.frames(LENGTH_REACH);
         if let Some(end) = self.expected_end()
             && estimate + after + reach >= end
-            && end + reach + before >= estimate
+            && end + SPOTIFY_GAP + reach + before >= estimate
         {
             return Search {
                 from: end.saturating_sub(reach),
@@ -299,12 +300,13 @@ impl Splitter {
     }
 
     /// Audio may be written up to the search window of the next pending
-    /// cut, so the cut can still move back onto a silence.
+    /// cut, so the cut can still move back onto a silence, and up to half a
+    /// second before it: Spotify's gap is only recognised whole.
     fn write_limit(&self) -> u64 {
         self.pending
             .iter()
             .filter(|p| matches!(p.change, Change::Content(_)))
-            .map(|p| self.search(p).from)
+            .map(|p| self.search(p).from.saturating_sub(SPOTIFY_GAP))
             .min()
             .unwrap_or(u64::MAX)
     }
@@ -601,6 +603,48 @@ mod tests {
         assert_eq!(tracks[0].1, vec![0.1, 0.0]);
         assert_eq!(tracks[0].2, 5 * SECOND + SECOND / 20);
         assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    /// One (5 s of sound), Spotify's gap, then Two with `lead` frames of
+    /// its own silence, which SMTC dates near the end of the gap, as seen
+    /// on 2026-10-29.
+    fn dated_late_in_the_gap(one: Track, lead: u64) -> Vec<(String, Vec<f32>, u64)> {
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 2 + lead));
+        run.audio(&music(0.2, SECOND));
+        let dated = 5 * SECOND + 47 * SECOND / 100;
+        run.change(
+            dated + SECOND / 3,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.change(
+            dated + SECOND,
+            Change::TrackStart {
+                title: track("Two").title,
+                frame: Some(dated),
+            },
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        summary(&run.finish())
+    }
+
+    #[test]
+    fn a_start_dated_at_the_end_of_spotifys_gap_still_ends_at_the_length() {
+        // Two's own 200 ms of silence stay Two's: One ends at its length.
+        let tracks = dated_late_in_the_gap(lasting("One", Duration::from_secs(5)), SECOND / 5);
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    #[test]
+    fn spotifys_gap_is_found_whole_far_from_the_estimate() {
+        // Without a length, the cut is searched 100 ms around the dated
+        // start, 470 ms into the gap: the gap is still recognised.
+        let tracks = dated_late_in_the_gap(track("One"), 0);
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.2]);
     }
 
     #[test]
