@@ -243,6 +243,28 @@ impl Splitter {
                 let held: Vec<f32> = front.iter().chain(back).copied().collect();
                 let search = self.search(&pending);
                 let cut = place_cut(&held, self.buffer_start, search);
+                // What placed each cut, to check them against a recording.
+                let ms = |frame: u64| frame as i64 * 1000 / i64::from(self.sample_rate);
+                tracing::info!(
+                    "cut {} -> {}: {:?} at {} ms ({:+} ms from the {} estimate), {:?} target {:+} ms, search {:+}..{:+} ms, resume {:+} ms",
+                    self.active
+                        .as_ref()
+                        .map_or_else(|| "-".into(), |a| a.track.title.to_string()),
+                    match &pending.change {
+                        Change::Content(Content::Track(t)) => t.title.to_string(),
+                        Change::Content(other) => format!("{other:?}"),
+                        _ => String::new(),
+                    },
+                    cut.by,
+                    ms(cut.frame),
+                    ms(cut.frame) - ms(pending.frame),
+                    if pending.dated { "SMTC" } else { "title" },
+                    search.kind,
+                    ms(search.target) - ms(pending.frame),
+                    ms(search.from) - ms(pending.frame),
+                    ms(search.to) - ms(pending.frame),
+                    ms(cut.resume) - ms(cut.frame),
+                );
                 self.write_until(cut.frame, actions);
                 self.skip_until(cut.resume);
                 pending.frame = cut.resume.max(self.buffer_start);

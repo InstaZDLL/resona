@@ -122,7 +122,7 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
     }
 
     if search.spotify_gap
-        && let Some((start, end)) = audio.spotify_gap(from, to, target)
+        && let Some((start, end)) = audio.silence_near(from, to, target, SPOTIFY_GAP)
     {
         // The gap sits between the tracks' own silences, whose share is
         // unknown: it is placed at the target, as far as the run allows.
@@ -133,13 +133,15 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
             by: CutBy::SpotifyGap,
         };
     }
+    // Any frame of digital silence is a clean cut: the target, as far as
+    // the silence allows. A millisecond of it is enough: skipping within an
+    // album, Spotify fades the old track out then plays the next one after
+    // 1.5 ms of zeros (2026-10-29), too short for a block, and the cut
+    // went 148 ms into the next track's quiet intro.
+    if let Some((start, end)) = audio.silence_near(from, to, target, PEAK_FRAMES as u64) {
+        return Cut::at(target.clamp(start, end), CutBy::Silence);
+    }
     if let Some((rms, at)) = audio.quietest_block(from, to, target) {
-        if rms == 0.0 {
-            // Any frame of digital silence is a clean cut: the target, as
-            // far as the silence allows.
-            let (start, end) = audio.silence_around(at);
-            return Cut::at(target.clamp(start, end), CutBy::Silence);
-        }
         // A track ending on a noise floor under −60 dBFS moved 64 ms
         // towards its quietest block.
         if search.kind == Kind::Ending {
@@ -182,23 +184,10 @@ impl Audio<'_> {
         self.frames(at, 1) == [0.0, 0.0]
     }
 
-    /// The run of digital silence (start, end) that holds frame `at`.
-    fn silence_around(&self, at: u64) -> (u64, u64) {
-        let mut start = at;
-        while start > self.first_frame && self.is_silent(start - 1) {
-            start -= 1;
-        }
-        let mut end = at;
-        while end < self.end() && self.is_silent(end) {
-            end += 1;
-        }
-        (start, end)
-    }
-
-    /// The run of digital silence (start, end) at least [`SPOTIFY_GAP`]
-    /// long that meets `from..to`, nearest `target`. The run is followed
+    /// The run of digital silence (start, end) at least `min` frames long
+    /// that meets `from..to`, nearest `target`. The run is followed
     /// through all the audio held, past the search.
-    fn spotify_gap(&self, from: u64, to: u64, target: u64) -> Option<(u64, u64)> {
+    fn silence_near(&self, from: u64, to: u64, target: u64, min: u64) -> Option<(u64, u64)> {
         let mut best: Option<(u64, u64)> = None;
         let distance = |(start, end): (u64, u64)| target.clamp(start, end).abs_diff(target);
         let mut at = self.first_frame;
@@ -212,7 +201,7 @@ impl Audio<'_> {
                 at += 1;
             }
             let run = (start, at);
-            if at - start >= SPOTIFY_GAP
+            if at - start >= min
                 && start < to
                 && at > from
                 && best.is_none_or(|best| distance(run) < distance(best))
@@ -424,6 +413,21 @@ mod tests {
             (19_400..19_841).contains(&interrupted.frame),
             "{interrupted:?}"
         );
+    }
+
+    #[test]
+    fn a_millisecond_of_digital_silence_marks_the_junction() {
+        // Skipping within an album: the old track's fade-out, 65 frames of
+        // zeros, then the next track's quiet intro (−50 dBFS peaks), even
+        // quieter further on.
+        let samples = shaped(44_100, |f| match f {
+            ..20_000 => 1.0,
+            20_000..20_065 => 0.0,
+            26_000..26_441 => 0.0002,
+            _ => 0.005,
+        });
+        let placed = place_cut(&samples, 0, around(19_000, 13_230, Kind::Interrupted));
+        assert_eq!(placed, Cut::at(20_000, CutBy::Silence));
     }
 
     #[test]
