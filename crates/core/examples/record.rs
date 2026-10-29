@@ -22,7 +22,8 @@ fn main() -> anyhow::Result<()> {
         .with(
             tracing_subscriber::filter::Targets::new()
                 .with_default(tracing::Level::WARN)
-                .with_target("lofty", tracing::Level::ERROR),
+                .with_target("lofty", tracing::Level::ERROR)
+                .with_target("resona_core::recorder::splitter", tracing::Level::INFO),
         )
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();

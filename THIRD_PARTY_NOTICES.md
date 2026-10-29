@@ -12,9 +12,11 @@ Both files are installed next to `resona.exe`.
 
 Resona is a rewrite in Rust of [Spytify](https://github.com/jwallet/spy-spotify)
 (C#, by jwallet). It follows Spytify's approach — record the Spotify desktop
-client's output and split it into tracks — but no Spytify source code was
-copied: the engine, the interface and the formats were written anew. Spytify's
-MIT notice is preserved verbatim below, as a courtesy and for clarity.
+client's output and split it into tracks. The engine, the interface and the
+formats were written anew, except where tracks are cut: `recorder::boundary`
+adapts the cut placement of Spytify's Go rewrite (`internal/core/session.go`
+and `internal/core/ring.go`), under the same MIT licence. Spytify's MIT notice
+is preserved verbatim below.
 
 ```
 MIT License

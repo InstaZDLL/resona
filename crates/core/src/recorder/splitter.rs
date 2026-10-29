@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use super::boundary::{Window, snap_to_silence};
+use super::boundary::{Kind, SPOTIFY_GAP, Search, place_cut};
 use crate::spotify::state::{Content, Track};
 use crate::spotify::title::TrackTitle;
 
@@ -27,10 +27,17 @@ pub const DETAILS_SETTLE: Duration = Duration::from_millis(1500);
 /// Spotify's output latency. Wider windows were tried on 2026-10-03 and
 /// were wrong: the drift they chased came from Spotify's crossfade and
 /// Automix, switched back on by a Spotify update. They also risk cutting
-/// into a quiet intro.
-const SNAP_DATED: (Duration, Duration) = (Duration::from_millis(100), Duration::from_millis(100));
+/// into a quiet intro. After a skip, SMTC dates the next track at the
+/// click, while Spotify still plays the old one's 125 ms fade-out, then
+/// 250 ms of silence (2026-10-29): a dated cut reaches 300 ms after.
+const SNAP_DATED: (Duration, Duration) = (Duration::from_millis(100), Duration::from_millis(300));
 const SNAP_ESTIMATED: (Duration, Duration) =
     (Duration::from_millis(300), Duration::from_millis(300));
+/// How far a cut may move around the end SMTC's length gives a track (its
+/// start plus its duration). That end is trusted when the change agrees
+/// with it, both within reach of each other: the start it counts from is
+/// itself a cut, placed to within Spotify's output latency.
+const LENGTH_REACH: Duration = Duration::from_millis(200);
 /// Digital silence kept at either end of a track, at most. Spotify's
 /// tracks include their own leading and trailing silence: keeping it gives
 /// the file the catalogue's length and keeps synced lyrics on time
@@ -102,6 +109,11 @@ struct Pending {
 
 struct Active {
     track: Track,
+    /// Where the track was cut from the previous one.
+    origin: u64,
+    /// Paused at some point: its start plus its length no longer tell
+    /// where it ends.
+    paused: bool,
     frames: u64,
     joined_late: bool,
     /// The track made a sound: a track that never does leaves no file.
@@ -229,10 +241,35 @@ impl Splitter {
             if matches!(pending.change, Change::Content(_)) {
                 let (front, back) = self.buffer.as_slices();
                 let held: Vec<f32> = front.iter().chain(back).copied().collect();
-                let window = self.snap_window(&pending);
-                pending.frame = snap_to_silence(&held, self.buffer_start, pending.frame, window)
-                    .max(self.buffer_start);
-                self.write_until(pending.frame, actions);
+                let search = self.search(&pending);
+                let cut = place_cut(&held, self.buffer_start, search);
+                // What placed each cut, to check them against a recording.
+                let ms = |frame: u64| frame as i64 * 1000 / i64::from(self.sample_rate);
+                tracing::info!(
+                    "cut {} -> {}: {:?} at {} ms ({:+} ms from the {} estimate), {:?} target {:+} ms, search {:+}..{:+} ms, resume {:+} ms",
+                    self.active
+                        .as_ref()
+                        .map_or_else(|| "-".into(), |a| a.track.title.to_string()),
+                    match &pending.change {
+                        Change::Content(Content::Track(t)) => t.title.to_string(),
+                        Change::Content(other) => format!("{other:?}"),
+                        _ => String::new(),
+                    },
+                    cut.by,
+                    ms(cut.frame),
+                    ms(cut.frame) - ms(pending.frame),
+                    if pending.dated { "SMTC" } else { "title" },
+                    search.kind,
+                    ms(search.target) - ms(pending.frame),
+                    ms(search.from) - ms(pending.frame),
+                    ms(search.to) - ms(pending.frame),
+                    ms(cut.resume) - ms(cut.frame),
+                );
+                self.write_until(cut.frame, actions);
+                self.skip_until(cut.resume);
+                // Where the next track starts: `cut.resume`, or the end of the
+                // audio held when finishing put the cut past it.
+                pending.frame = self.buffer_start;
             } else {
                 // Applying a playback or details change slightly early is
                 // harmless; writing into a pending cut's search window is not.
@@ -243,26 +280,84 @@ impl Splitter {
         self.write_until(upto.min(self.write_limit()), actions);
     }
 
-    fn snap_window(&self, pending: &Pending) -> Window {
+    /// Where to look for the cut of a content change: around the current
+    /// track's end when its length is known and the change agrees with it
+    /// (SMTC may date the next track as late as the end of Spotify's gap),
+    /// around the change otherwise.
+    fn search(&self, pending: &Pending) -> Search {
         let (before, after) = if pending.dated {
             SNAP_DATED
         } else {
             SNAP_ESTIMATED
         };
-        let frames = |d: Duration| (d.as_secs_f64() * f64::from(self.sample_rate)) as u64;
-        Window {
-            before: frames(before),
-            after: frames(after),
+        let (before, after) = (self.frames(before), self.frames(after));
+        let estimate = pending.frame;
+        let reach = self.frames(LENGTH_REACH);
+        let spotify_gap = self.changes_album(pending);
+        if let Some(end) = self.expected_end()
+            && estimate + after + reach >= end
+            && end + SPOTIFY_GAP + reach + before >= estimate
+        {
+            return Search {
+                from: end.saturating_sub(reach),
+                to: end + reach,
+                target: end,
+                kind: Kind::Ending,
+                spotify_gap,
+            };
+        }
+        Search {
+            from: estimate.saturating_sub(before),
+            to: estimate + after,
+            target: estimate,
+            kind: Kind::Interrupted,
+            spotify_gap,
         }
     }
 
+    /// The change goes to a track of another album, or the albums are
+    /// unknown: Spotify plays its gap between them. The next track's album
+    /// comes with its title, or with the SMTC details that follow.
+    fn changes_album(&self, pending: &Pending) -> bool {
+        let Some(active) = &self.active else {
+            return true;
+        };
+        let Change::Content(Content::Track(next)) = &pending.change else {
+            return true;
+        };
+        let next_album = next.details.album.as_ref().or_else(|| {
+            self.pending.iter().find_map(|p| match &p.change {
+                Change::Details(track) if track.title == next.title => track.details.album.as_ref(),
+                _ => None,
+            })
+        });
+        match (&active.track.details.album, next_album) {
+            (Some(album), Some(next_album)) => album != next_album,
+            _ => true,
+        }
+    }
+
+    /// The current track's start plus the length SMTC gave it.
+    fn expected_end(&self) -> Option<u64> {
+        let active = self.active.as_ref()?;
+        if active.joined_late || active.paused {
+            return None;
+        }
+        Some(active.origin + self.frames(active.track.details.duration?))
+    }
+
+    fn frames(&self, duration: Duration) -> u64 {
+        (duration.as_secs_f64() * f64::from(self.sample_rate)) as u64
+    }
+
     /// Audio may be written up to the search window of the next pending
-    /// cut, so the cut can still move back onto a silence.
+    /// cut, so the cut can still move back onto a silence, and up to half a
+    /// second before it: Spotify's gap is only recognised whole.
     fn write_limit(&self) -> u64 {
         self.pending
             .iter()
             .filter(|p| matches!(p.change, Change::Content(_)))
-            .map(|p| p.frame.saturating_sub(self.snap_window(p).before))
+            .map(|p| self.search(p).from.saturating_sub(SPOTIFY_GAP))
             .min()
             .unwrap_or(u64::MAX)
     }
@@ -274,6 +369,8 @@ impl Splitter {
                 if let Content::Track(track) = content {
                     self.active = Some(Active {
                         track,
+                        origin: pending.frame,
+                        paused: self.paused,
                         frames: 0,
                         joined_late: pending.joined_late,
                         started: false,
@@ -281,7 +378,12 @@ impl Splitter {
                     });
                 }
             }
-            Change::Playing(playing) => self.paused = !playing,
+            Change::Playing(playing) => {
+                self.paused = !playing;
+                if let Some(active) = self.active.as_mut() {
+                    active.paused |= !playing;
+                }
+            }
             Change::Details(track) => {
                 if let Some(active) = self.active.as_mut()
                     && active.track.title == track.title
@@ -309,6 +411,16 @@ impl Splitter {
                 joined_late: active.joined_late,
             }));
         }
+    }
+
+    /// Drops held-back audio up to `frame`: Spotify's gap between two
+    /// tracks, part of neither.
+    fn skip_until(&mut self, frame: u64) {
+        let count = frame
+            .saturating_sub(self.buffer_start)
+            .min((self.buffer.len() / 2) as u64);
+        self.buffer.drain(..(count * 2) as usize);
+        self.buffer_start += count;
     }
 
     /// Moves held-back audio up to `frame` into the current track.
@@ -495,6 +607,217 @@ mod tests {
         assert_eq!(tracks[0].1, vec![0.1]);
         assert_eq!(tracks[1].1, vec![0.2]);
         assert_eq!(tracks[1].2, 5 * SECOND);
+    }
+
+    fn lasting(name: &str, duration: Duration) -> Track {
+        let mut track = track(name);
+        track.details.duration = Some(duration);
+        track
+    }
+
+    #[test]
+    fn gapless_cuts_at_the_declared_length() {
+        let mut run = Run::new();
+        run.change(
+            0,
+            Change::Content(Content::Track(lasting("One", Duration::from_secs(5)))),
+        );
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.2, SECOND / 2));
+        // Title noticed 400 ms late, no silence to snap to.
+        run.change(
+            5 * SECOND + 2 * SECOND / 5,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.2]);
+    }
+
+    #[test]
+    fn a_gap_is_split_at_the_declared_length() {
+        // One lasts 5.05 s: its last 50 ms are silence, the next 50 ms are
+        // Two's.
+        let one = lasting("One", Duration::from_millis(5_050));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 10));
+        run.audio(&music(0.2, SECOND / 2));
+        run.change(
+            5 * SECOND + 3 * SECOND / 10,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0].1, vec![0.1, 0.0]);
+        assert_eq!(tracks[0].2, 5 * SECOND + SECOND / 20);
+        assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    /// One (5 s of sound), Spotify's gap, then Two with `lead` frames of
+    /// its own silence, which SMTC dates near the end of the gap, as seen
+    /// on 2026-10-29.
+    fn dated_late_in_the_gap(one: Track, lead: u64) -> Vec<(String, Vec<f32>, u64)> {
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 2 + lead));
+        run.audio(&music(0.2, SECOND));
+        let dated = 5 * SECOND + 47 * SECOND / 100;
+        run.change(
+            dated + SECOND / 3,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.change(
+            dated + SECOND,
+            Change::TrackStart {
+                title: track("Two").title,
+                frame: Some(dated),
+            },
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        summary(&run.finish())
+    }
+
+    #[test]
+    fn a_start_dated_at_the_end_of_spotifys_gap_still_ends_at_the_length() {
+        // Two's own 200 ms of silence stay Two's: One ends at its length.
+        let tracks = dated_late_in_the_gap(lasting("One", Duration::from_secs(5)), SECOND / 5);
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    #[test]
+    fn spotifys_gap_is_found_whole_far_from_the_estimate() {
+        // Without a length, the cut is searched 100 ms around the dated
+        // start, 470 ms into the gap: the gap is still recognised.
+        let tracks = dated_late_in_the_gap(track("One"), 0);
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.2]);
+    }
+
+    #[test]
+    fn spotifys_gap_belongs_to_neither_track() {
+        // As measured on 2026-10-29: Spotify plays 500 ms of digital
+        // silence between tracks, and SMTC dates the next one a little
+        // after the gap begins. Two opens with 200 ms of its own silence.
+        let five = Duration::from_secs(5);
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(lasting("One", five))));
+        let dated = |run: &mut Run, name: &str, at: u64| {
+            run.change(
+                at + SECOND / 3,
+                Change::Content(Content::Track(lasting(name, five))),
+            );
+            run.change(
+                at + SECOND,
+                Change::TrackStart {
+                    title: track(name).title,
+                    frame: Some(at),
+                },
+            );
+        };
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 2 + SECOND / 5));
+        run.audio(&music(0.2, SECOND));
+        dated(&mut run, "Two", 5 * SECOND + SECOND / 12);
+        run.audio(&music(0.2, 3 * SECOND + 4 * SECOND / 5));
+        run.audio(&music(0.0, SECOND / 2));
+        run.audio(&music(0.3, SECOND));
+        dated(&mut run, "Three", 10 * SECOND + SECOND / 2 + SECOND / 12);
+        run.audio(&music(0.3, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1], ("Two".into(), vec![0.0, 0.2], 5 * SECOND));
+        assert_eq!(tracks[2].1, vec![0.3]);
+    }
+
+    fn on(album: &str, mut track: Track) -> Track {
+        track.details.album = Some(album.into());
+        track
+    }
+
+    /// SMTC dates `name` at `at`, after its title showed a second later.
+    fn dated_start(run: &mut Run, next: Track, at: u64) {
+        let title = next.title.clone();
+        run.change(at + SECOND / 3, Change::Content(Content::Track(next)));
+        run.change(
+            at + SECOND,
+            Change::TrackStart {
+                title,
+                frame: Some(at),
+            },
+        );
+    }
+
+    #[test]
+    fn within_an_album_the_tracks_own_silence_is_kept() {
+        // A live album: One ends on a second of its own digital silence,
+        // and Spotify plays Two right after it, without its gap.
+        let one = on("Live", lasting("One", Duration::from_secs(5)));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 4 * SECOND));
+        run.audio(&music(0.0, SECOND));
+        run.audio(&music(0.2, SECOND + SECOND / 2));
+        // Two's album comes with the SMTC details, after its title.
+        dated_start(&mut run, track("Two"), 5 * SECOND + SECOND / 12);
+        run.change(
+            5 * SECOND + SECOND,
+            Change::Details(on("Live", track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0], ("One".into(), vec![0.1, 0.0], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.2]);
+    }
+
+    #[test]
+    fn a_skip_cuts_after_the_old_tracks_fade_out() {
+        // Skipped at 3 s: Spotify fades One out over 125 ms, then plays
+        // 250 ms of silence before Two. SMTC dates Two at the click.
+        let one = on("A", lasting("One", Duration::from_secs(200)));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 3 * SECOND));
+        run.audio(&music(0.05, SECOND / 8));
+        run.audio(&music(0.0, SECOND / 4));
+        run.audio(&music(0.2, SECOND + SECOND / 2));
+        dated_start(&mut run, on("B", track("Two")), 3 * SECOND);
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(
+            tracks[0],
+            ("One".into(), vec![0.1, 0.05], 3 * SECOND + SECOND / 8)
+        );
+        assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    #[test]
+    fn a_skip_cuts_at_the_next_tracks_first_sample() {
+        let one = lasting("One", Duration::from_secs(200));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 3 * SECOND));
+        // Skipped mid-note: Two opens with 5 ms near silence (−80 dBFS),
+        // too short to be a gap.
+        run.audio(&music(0.0001, 220));
+        run.audio(&music(0.2, SECOND / 2));
+        run.change(
+            3 * SECOND + 3 * SECOND / 20,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0].1, vec![0.1, 0.0001]);
+        assert!(
+            (3 * SECOND..3 * SECOND + 220).contains(&tracks[0].2),
+            "{}",
+            tracks[0].2
+        );
+        assert!(!tracks[1].1.contains(&0.1));
     }
 
     #[test]
