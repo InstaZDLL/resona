@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.1-2563eb?style=flat-square" alt="Version 0.3.1" />
+  <img src="https://img.shields.io/badge/version-0.4.0-2563eb?style=flat-square" alt="Version 0.4.0" />
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11" />
   <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit%20%2F%2044.1%20kHz-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit / 44.1 kHz" />
   <img src="https://img.shields.io/badge/rust-1.98-orange?style=flat-square&logo=rust" alt="Rust 1.98" />
