@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use super::boundary::{Window, snap_to_silence};
+use super::boundary::{Kind, Search, place_cut};
 use crate::spotify::state::{Content, Track};
 use crate::spotify::title::TrackTitle;
 
@@ -31,6 +31,11 @@ pub const DETAILS_SETTLE: Duration = Duration::from_millis(1500);
 const SNAP_DATED: (Duration, Duration) = (Duration::from_millis(100), Duration::from_millis(100));
 const SNAP_ESTIMATED: (Duration, Duration) =
     (Duration::from_millis(300), Duration::from_millis(300));
+/// How far a cut may move around the end SMTC's length gives a track (its
+/// start plus its duration). That end is trusted when the change agrees
+/// with it, both within reach of each other: the start it counts from is
+/// itself a cut, placed to within Spotify's output latency.
+const LENGTH_REACH: Duration = Duration::from_millis(200);
 /// Digital silence kept at either end of a track, at most. Spotify's
 /// tracks include their own leading and trailing silence: keeping it gives
 /// the file the catalogue's length and keeps synced lyrics on time
@@ -102,6 +107,11 @@ struct Pending {
 
 struct Active {
     track: Track,
+    /// Where the track was cut from the previous one.
+    origin: u64,
+    /// Paused at some point: its start plus its length no longer tell
+    /// where it ends.
+    paused: bool,
     frames: u64,
     joined_late: bool,
     /// The track made a sound: a track that never does leaves no file.
@@ -229,8 +239,9 @@ impl Splitter {
             if matches!(pending.change, Change::Content(_)) {
                 let (front, back) = self.buffer.as_slices();
                 let held: Vec<f32> = front.iter().chain(back).copied().collect();
-                let window = self.snap_window(&pending);
-                pending.frame = snap_to_silence(&held, self.buffer_start, pending.frame, window)
+                let search = self.search(&pending);
+                pending.frame = place_cut(&held, self.buffer_start, search)
+                    .frame
                     .max(self.buffer_start);
                 self.write_until(pending.frame, actions);
             } else {
@@ -243,17 +254,48 @@ impl Splitter {
         self.write_until(upto.min(self.write_limit()), actions);
     }
 
-    fn snap_window(&self, pending: &Pending) -> Window {
+    /// Where to look for the cut of a content change: around the current
+    /// track's end when its length is known and the change agrees with it,
+    /// around the change otherwise.
+    fn search(&self, pending: &Pending) -> Search {
         let (before, after) = if pending.dated {
             SNAP_DATED
         } else {
             SNAP_ESTIMATED
         };
-        let frames = |d: Duration| (d.as_secs_f64() * f64::from(self.sample_rate)) as u64;
-        Window {
-            before: frames(before),
-            after: frames(after),
+        let (before, after) = (self.frames(before), self.frames(after));
+        let estimate = pending.frame;
+        let reach = self.frames(LENGTH_REACH);
+        if let Some(end) = self.expected_end()
+            && estimate + after + reach >= end
+            && end + reach + before >= estimate
+        {
+            return Search {
+                from: end.saturating_sub(reach),
+                to: end + reach,
+                target: end,
+                kind: Kind::Ending,
+            };
         }
+        Search {
+            from: estimate.saturating_sub(before),
+            to: estimate + after,
+            target: estimate,
+            kind: Kind::Interrupted,
+        }
+    }
+
+    /// The current track's start plus the length SMTC gave it.
+    fn expected_end(&self) -> Option<u64> {
+        let active = self.active.as_ref()?;
+        if active.joined_late || active.paused {
+            return None;
+        }
+        Some(active.origin + self.frames(active.track.details.duration?))
+    }
+
+    fn frames(&self, duration: Duration) -> u64 {
+        (duration.as_secs_f64() * f64::from(self.sample_rate)) as u64
     }
 
     /// Audio may be written up to the search window of the next pending
@@ -262,7 +304,7 @@ impl Splitter {
         self.pending
             .iter()
             .filter(|p| matches!(p.change, Change::Content(_)))
-            .map(|p| p.frame.saturating_sub(self.snap_window(p).before))
+            .map(|p| self.search(p).from)
             .min()
             .unwrap_or(u64::MAX)
     }
@@ -274,6 +316,8 @@ impl Splitter {
                 if let Content::Track(track) = content {
                     self.active = Some(Active {
                         track,
+                        origin: pending.frame,
+                        paused: self.paused,
                         frames: 0,
                         joined_late: pending.joined_late,
                         started: false,
@@ -281,7 +325,12 @@ impl Splitter {
                     });
                 }
             }
-            Change::Playing(playing) => self.paused = !playing,
+            Change::Playing(playing) => {
+                self.paused = !playing;
+                if let Some(active) = self.active.as_mut() {
+                    active.paused |= !playing;
+                }
+            }
             Change::Details(track) => {
                 if let Some(active) = self.active.as_mut()
                     && active.track.title == track.title
@@ -495,6 +544,78 @@ mod tests {
         assert_eq!(tracks[0].1, vec![0.1]);
         assert_eq!(tracks[1].1, vec![0.2]);
         assert_eq!(tracks[1].2, 5 * SECOND);
+    }
+
+    fn lasting(name: &str, duration: Duration) -> Track {
+        let mut track = track(name);
+        track.details.duration = Some(duration);
+        track
+    }
+
+    #[test]
+    fn gapless_cuts_at_the_declared_length() {
+        let mut run = Run::new();
+        run.change(
+            0,
+            Change::Content(Content::Track(lasting("One", Duration::from_secs(5)))),
+        );
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.2, SECOND / 2));
+        // Title noticed 400 ms late, no silence to snap to.
+        run.change(
+            5 * SECOND + 2 * SECOND / 5,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
+        assert_eq!(tracks[1].1, vec![0.2]);
+    }
+
+    #[test]
+    fn a_gap_is_split_at_the_declared_length() {
+        // One lasts 5.05 s: its last 50 ms are silence, the next 50 ms are
+        // Two's.
+        let one = lasting("One", Duration::from_millis(5_050));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.audio(&music(0.0, SECOND / 10));
+        run.audio(&music(0.2, SECOND / 2));
+        run.change(
+            5 * SECOND + 3 * SECOND / 10,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0].1, vec![0.1, 0.0]);
+        assert_eq!(tracks[0].2, 5 * SECOND + SECOND / 20);
+        assert_eq!(tracks[1].1, vec![0.0, 0.2]);
+    }
+
+    #[test]
+    fn a_skip_cuts_at_the_next_tracks_first_sample() {
+        let one = lasting("One", Duration::from_secs(200));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(one)));
+        run.audio(&music(0.1, 3 * SECOND));
+        // Skipped mid-note: Two opens with 5 ms near silence (−80 dBFS),
+        // too short to be a gap.
+        run.audio(&music(0.0001, 220));
+        run.audio(&music(0.2, SECOND / 2));
+        run.change(
+            3 * SECOND + 3 * SECOND / 20,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        run.audio(&music(0.2, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        assert_eq!(tracks[0].1, vec![0.1, 0.0001]);
+        assert!(
+            (3 * SECOND..3 * SECOND + 220).contains(&tracks[0].2),
+            "{}",
+            tracks[0].2
+        );
+        assert!(!tracks[1].1.contains(&0.1));
     }
 
     #[test]
