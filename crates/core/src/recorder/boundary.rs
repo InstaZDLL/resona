@@ -5,11 +5,13 @@
 //! when SMTC dated it), or, at the end of a track, its start plus the
 //! length SMTC declared. [`place_cut`] looks around that frame for, in
 //! order: the half second of digital silence Spotify plays between two
-//! tracks, which belongs to neither and is left out; a silence; a dip well under the surrounding level, where two
-//! tracks fade or flow into each other; on a skip, the millisecond where
-//! the peak level collapses, the next track's first sample; and otherwise
-//! keeps the frame it was given, the declared length being the best guess
-//! for a gapless transition.
+//! tracks, which belongs to neither and is left out; a silence; a dip well
+//! under the surrounding level, where two tracks fade or flow into each
+//! other; on a skip, the millisecond where the peak level collapses, the
+//! next track's first sample; and otherwise keeps the frame it was given.
+//! At the end of a track the declared length is exact to the millisecond
+//! (measured on 2026-10-29): only digital silence moves that cut, a quiet
+//! passage or a dip would only pull it off.
 //!
 //! Adapted from Spytify v2 (Go, `internal/core/session.go` `tryResolve`
 //! and `internal/core/ring.go`, MIT, see `THIRD_PARTY_NOTICES.md`). Unlike
@@ -138,6 +140,11 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
             let (start, end) = audio.silence_around(at);
             return Cut::at(target.clamp(start, end), CutBy::Silence);
         }
+        // A track ending on a noise floor under −60 dBFS moved 64 ms
+        // towards its quietest block.
+        if search.kind == Kind::Ending {
+            return fallback;
+        }
         if rms < QUIET_RMS {
             return Cut::at(audio.refine(at, target), CutBy::Silence);
         }
@@ -145,10 +152,9 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
             return Cut::at(audio.refine(at, target), CutBy::Dip);
         }
     }
-    // Only after a skip: at the end of a track, a percussive break would
-    // pass for an edge.
-    if search.kind == Kind::Interrupted
-        && let Some((peak, at, median)) = audio.quietest_peak(from, to, target)
+    // Only after a skip (Ending has returned): at the end of a track, a
+    // percussive break would pass for an edge.
+    if let Some((peak, at, median)) = audio.quietest_peak(from, to, target)
         && peak <= median * EDGE_RATIO
     {
         return Cut::at(at, CutBy::Edge);
@@ -402,6 +408,25 @@ mod tests {
     }
 
     #[test]
+    fn at_a_tracks_end_the_length_beats_a_quiet_noise_floor() {
+        // A noise floor around −66 dBFS, 20 dB quieter 60 ms before the
+        // declared end.
+        let samples = shaped(44_100, |f| match f {
+            19_400..19_841 => 0.0002,
+            _ => 0.002,
+        });
+        let ending = place_cut(&samples, 0, around(22_050, 8_820, Kind::Ending));
+        assert_eq!(ending, Cut::at(22_050, CutBy::Length));
+        // Around a change, the quietest moment wins.
+        let interrupted = place_cut(&samples, 0, around(22_050, 8_820, Kind::Interrupted));
+        assert_eq!(interrupted.by, CutBy::Silence);
+        assert!(
+            (19_400..19_841).contains(&interrupted.frame),
+            "{interrupted:?}"
+        );
+    }
+
+    #[test]
     fn a_crossfade_cuts_in_its_dip() {
         // Two tracks crossfading: the level drops 25 dB around frame 22 050
         // without reaching silence.
@@ -409,7 +434,7 @@ mod tests {
             let distance = (f as f32 - 22_050.0).abs();
             (distance / 1_323.0).clamp(0.056, 1.0)
         });
-        let placed = place_cut(&samples, 0, around(22_500, 6_615, Kind::Ending));
+        let placed = place_cut(&samples, 0, around(22_500, 6_615, Kind::Interrupted));
         assert_eq!(placed.by, CutBy::Dip);
         assert!(placed.frame.abs_diff(22_050) < 100, "{placed:?}");
     }
