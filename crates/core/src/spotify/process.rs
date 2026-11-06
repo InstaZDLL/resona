@@ -20,9 +20,12 @@ pub struct SpotifyProcesses {
 
 impl SpotifyProcesses {
     pub fn find() -> Option<Self> {
+        // A failed process listing reads as "Spotify not running": callers
+        // poll this, so the next call simply tries again.
         let system = System::new_with_specifics(
             RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
-        );
+        )
+        .ok()?;
         let name = OsStr::new(PROCESS_NAME);
         let all: HashSet<u32> = system
             .processes_by_exact_name(name)
