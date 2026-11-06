@@ -7301,7 +7301,7 @@ THE SOFTWARE.
 ## MIT License
 
 Used by:
-- [sysinfo 0.39.6](https://github.com/GuillaumeGomez/sysinfo)
+- [sysinfo 0.40.0](https://github.com/GuillaumeGomez/sysinfo)
 
 ```
 The MIT License (MIT)
