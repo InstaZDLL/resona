@@ -212,12 +212,32 @@ impl Splitter {
 
     fn date_start(&mut self, title: &TrackTitle, frame: Option<u64>) {
         let is_switch_to = |p: &Pending| matches!(&p.change, Change::Content(Content::Track(t)) if &t.title == title);
-        if let Some(index) = self.pending.iter().position(is_switch_to) {
+        // SMTC only dates the track playing now: the latest change to it.
+        if let Some(index) = self.pending.iter().rposition(is_switch_to) {
             let mut pending = self.pending.remove(index);
             match frame {
                 Some(frame) if frame >= self.buffer_start => {
+                    let from = pending.frame;
                     pending.frame = frame;
                     pending.dated = true;
+                    // SMTC dates the start as late as the end of Spotify's
+                    // gap, after details it sent for this track: left in
+                    // front of it, they would meet the previous track and be
+                    // lost, along with the length that tells a partial track.
+                    // Only those sent since the change: earlier ones belong
+                    // to an earlier play of the same title.
+                    if let Change::Content(Content::Track(track)) = &mut pending.change {
+                        self.pending.retain(|p| match &p.change {
+                            Change::Details(details)
+                                if details.title == track.title
+                                    && (from..frame).contains(&p.frame) =>
+                            {
+                                track.details = details.details.clone();
+                                false
+                            }
+                            _ => true,
+                        });
+                    }
                 }
                 // Started before the audio we still hold: before the
                 // capture, or so long ago the cut is already written.
@@ -929,6 +949,104 @@ mod tests {
         };
         assert!(!ended.joined_late);
         assert!(ended.is_partial(RATE, Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn details_survive_a_start_dated_after_them() {
+        // Measured 2026-11-10: the title switched a poll before SMTC, so the
+        // change came without details. On the next poll SMTC sent them,
+        // then dated the start at the end of Spotify's gap, after them.
+        let mut two = track("Two");
+        two.details.duration = Some(Duration::from_secs(210));
+        two.details.album = Some("Waking the Tiger".into());
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.change(5 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.audio(&music(0.0, SECOND / 2));
+        run.change(5 * SECOND + SECOND / 4, Change::Details(two));
+        run.change(
+            5 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("Two").title,
+                frame: Some(5 * SECOND + SECOND / 2),
+            },
+        );
+        // Stopped 20 s into a 210 s track.
+        run.audio(&music(0.2, 20 * SECOND));
+        let actions = run.finish();
+        let Some(Action::End(ended)) = actions.last() else {
+            panic!()
+        };
+        assert_eq!(ended.track.title.title, "Two");
+        assert_eq!(ended.track.details.duration, Some(Duration::from_secs(210)));
+        assert_eq!(
+            ended.track.details.album.as_deref(),
+            Some("Waking the Tiger")
+        );
+        assert!(ended.is_partial(RATE, Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn details_of_an_earlier_play_stay_with_it() {
+        // One, Two, then One again, all within the audio held back: the
+        // first One's details are still pending when the second is dated.
+        let mut first = track("One");
+        first.details.album = Some("First".into());
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.audio(&music(0.1, SECOND));
+        run.change(SECOND, Change::Details(first));
+        run.change(3 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.change(4 * SECOND, Change::Content(Content::Track(track("One"))));
+        run.change(
+            4 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("One").title,
+                frame: Some(4 * SECOND + SECOND / 2),
+            },
+        );
+        run.audio(&music(0.1, 2 * SECOND));
+        run.audio(&music(0.2, SECOND + SECOND / 2));
+        run.audio(&music(0.3, 5 * SECOND));
+        let ends: Vec<Ended> = run
+            .finish()
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::End(ended) => Some(ended),
+                _ => None,
+            })
+            .collect();
+        let titles: Vec<&str> = ends.iter().map(|e| e.track.title.title.as_str()).collect();
+        assert_eq!(titles, ["One", "Two", "One"]);
+        assert_eq!(ends[0].track.details.album.as_deref(), Some("First"));
+        assert_eq!(ends[2].track.details.album, None);
+    }
+
+    #[test]
+    fn the_latest_play_of_a_title_is_dated() {
+        // One, Two, then One again, all pending when SMTC dates the second
+        // One: the first stays where it was.
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.change(2 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.change(4 * SECOND, Change::Content(Content::Track(track("One"))));
+        run.change(
+            4 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("One").title,
+                frame: Some(4 * SECOND + SECOND / 2),
+            },
+        );
+        run.audio(&music(0.1, 2 * SECOND));
+        run.audio(&music(0.2, 2 * SECOND + SECOND / 2));
+        run.audio(&music(0.3, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        let titles: Vec<&str> = tracks.iter().map(|t| t.0.as_str()).collect();
+        assert_eq!(titles, ["One", "Two", "One"]);
+        assert_eq!(tracks[0].1, vec![0.1]);
+        assert_eq!(tracks[1].1, vec![0.2]);
+        assert_eq!(tracks[2].1, vec![0.3]);
     }
 
     #[test]
