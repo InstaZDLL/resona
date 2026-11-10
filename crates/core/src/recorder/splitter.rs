@@ -218,6 +218,21 @@ impl Splitter {
                 Some(frame) if frame >= self.buffer_start => {
                     pending.frame = frame;
                     pending.dated = true;
+                    // SMTC dates the start as late as the end of Spotify's
+                    // gap, after details it sent for this track: left in
+                    // front of it, they would meet the previous track and be
+                    // lost, along with the length that tells a partial track.
+                    if let Change::Content(Content::Track(track)) = &mut pending.change {
+                        self.pending.retain(|p| match &p.change {
+                            Change::Details(details)
+                                if details.title == track.title && p.frame < frame =>
+                            {
+                                track.details = details.details.clone();
+                                false
+                            }
+                            _ => true,
+                        });
+                    }
                 }
                 // Started before the audio we still hold: before the
                 // capture, or so long ago the cut is already written.
@@ -929,6 +944,37 @@ mod tests {
         };
         assert!(!ended.joined_late);
         assert!(ended.is_partial(RATE, Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn details_survive_a_start_dated_after_them() {
+        // Measured 2026-11-10: the title switched a poll before SMTC, so the
+        // change came without details. On the next poll SMTC sent them,
+        // then dated the start at the end of Spotify's gap, after them.
+        let mut two = track("Two");
+        two.details.duration = Some(Duration::from_secs(210));
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.audio(&music(0.1, 5 * SECOND));
+        run.change(5 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.audio(&music(0.0, SECOND / 2));
+        run.change(5 * SECOND + SECOND / 4, Change::Details(two));
+        run.change(
+            5 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("Two").title,
+                frame: Some(5 * SECOND + SECOND / 2),
+            },
+        );
+        // Stopped 20 s into a 210 s track.
+        run.audio(&music(0.2, 20 * SECOND));
+        let actions = run.finish();
+        let Some(Action::End(ended)) = actions.last() else {
+            panic!()
+        };
+        assert_eq!(ended.track.title.title, "Two");
+        assert_eq!(ended.track.details.duration, Some(Duration::from_secs(210)));
+        assert!(ended.is_partial(RATE, Duration::from_secs(3)));
     }
 
     #[test]
