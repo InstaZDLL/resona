@@ -216,16 +216,20 @@ impl Splitter {
             let mut pending = self.pending.remove(index);
             match frame {
                 Some(frame) if frame >= self.buffer_start => {
+                    let from = pending.frame;
                     pending.frame = frame;
                     pending.dated = true;
                     // SMTC dates the start as late as the end of Spotify's
                     // gap, after details it sent for this track: left in
                     // front of it, they would meet the previous track and be
                     // lost, along with the length that tells a partial track.
+                    // Only those sent since the change: earlier ones belong
+                    // to an earlier play of the same title.
                     if let Change::Content(Content::Track(track)) = &mut pending.change {
                         self.pending.retain(|p| match &p.change {
                             Change::Details(details)
-                                if details.title == track.title && p.frame < frame =>
+                                if details.title == track.title
+                                    && (from..frame).contains(&p.frame) =>
                             {
                                 track.details = details.details.clone();
                                 false
@@ -953,6 +957,7 @@ mod tests {
         // then dated the start at the end of Spotify's gap, after them.
         let mut two = track("Two");
         two.details.duration = Some(Duration::from_secs(210));
+        two.details.album = Some("Waking the Tiger".into());
         let mut run = Run::new();
         run.change(0, Change::Content(Content::Track(track("One"))));
         run.audio(&music(0.1, 5 * SECOND));
@@ -974,7 +979,47 @@ mod tests {
         };
         assert_eq!(ended.track.title.title, "Two");
         assert_eq!(ended.track.details.duration, Some(Duration::from_secs(210)));
+        assert_eq!(
+            ended.track.details.album.as_deref(),
+            Some("Waking the Tiger")
+        );
         assert!(ended.is_partial(RATE, Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn details_of_an_earlier_play_stay_with_it() {
+        // One, Two, then One again, all within the audio held back: the
+        // first One's details are still pending when the second is dated.
+        let mut first = track("One");
+        first.details.album = Some("First".into());
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.audio(&music(0.1, SECOND));
+        run.change(SECOND, Change::Details(first));
+        run.change(3 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.change(4 * SECOND, Change::Content(Content::Track(track("One"))));
+        run.change(
+            4 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("One").title,
+                frame: Some(4 * SECOND + SECOND / 2),
+            },
+        );
+        run.audio(&music(0.1, 2 * SECOND));
+        run.audio(&music(0.2, SECOND + SECOND / 2));
+        run.audio(&music(0.3, 5 * SECOND));
+        let ends: Vec<Ended> = run
+            .finish()
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::End(ended) => Some(ended),
+                _ => None,
+            })
+            .collect();
+        let titles: Vec<&str> = ends.iter().map(|e| e.track.title.title.as_str()).collect();
+        assert_eq!(titles, ["One", "Two", "One"]);
+        assert_eq!(ends[0].track.details.album.as_deref(), Some("First"));
+        assert_eq!(ends[2].track.details.album, None);
     }
 
     #[test]
