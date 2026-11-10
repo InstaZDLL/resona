@@ -2465,7 +2465,7 @@ DEALINGS IN THE SOFTWARE.
 ## Boost Software License 1.0
 
 Used by:
-- [clipboard-win 5.4.1](https://github.com/DoumanAsh/clipboard-win)
+- [clipboard-win 5.4.3](https://github.com/DoumanAsh/clipboard-win)
 
 ```
 Boost Software License - Version 1.0 - August 17th, 2003
@@ -2481,7 +2481,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Community Data License Agreement Permissive 2.0
 
 Used by:
-- [webpki-roots 1.0.9](https://github.com/rustls/webpki-roots)
+- [webpki-roots 1.0.11](https://github.com/rustls/webpki-roots)
 
 ```
 # Community Data License Agreement - Permissive - Version 2.0
@@ -3130,7 +3130,7 @@ THIS SOFTWARE.
 ## ISC License
 
 Used by:
-- [rustls-webpki 0.103.15](https://github.com/rustls/webpki)
+- [rustls-webpki 0.103.16](https://github.com/rustls/webpki)
 
 ```
 Except as otherwise noted, this project is licensed under the following
@@ -7149,7 +7149,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## MIT License
 
 Used by:
-- [pulldown-cmark 0.13.4](https://github.com/raphlinus/pulldown-cmark)
+- [pulldown-cmark 0.13.6](https://github.com/raphlinus/pulldown-cmark)
 
 ```
 The MIT License
