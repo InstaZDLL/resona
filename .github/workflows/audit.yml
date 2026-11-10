@@ -1,0 +1,47 @@
+# Checks Cargo.lock against the RustSec advisory database. Runs on pushes,
+# pull requests and daily, and gates every release (release.yml calls it
+# and builds only if it passes).
+#
+# Dependabot alone is not enough for Rust: its alerts come from GitHub's
+# advisory database, which does not carry every RustSec advisory. The two
+# emSign advisories on rustls-webpki and webpki-roots (RUSTSEC-2026-0381,
+# RUSTSEC-2026-0382) were only found by running cargo-audit by hand.
+#
+# Fails on vulnerabilities only. Unmaintained, unsound and yanked crates
+# are listed as warnings in the log; most come through Slint.
+name: Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A new advisory can hit a lockfile that has not changed.
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    name: Dependency advisories
+    # Reads Cargo.lock only, nothing is built: no need for Windows.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # cargo is invoked, so the toolchain from rust-toolchain.toml must be
+      # installed.
+      - run: rustup show active-toolchain
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: cargo-audit@0.22.2
+      - run: cargo audit

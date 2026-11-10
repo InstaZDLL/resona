@@ -1,7 +1,7 @@
 # Builds the installer for a version tag (`v0.4.0`) and publishes it as a
 # GitHub release, which the app's update check then offers. Nothing is
-# built unless the tag matches Cargo.toml, the tests pass and CodeQL finds
-# nothing.
+# built unless the tag matches Cargo.toml, the tests pass, CodeQL finds
+# nothing and cargo-audit finds no vulnerable dependency.
 name: Release
 
 on:
@@ -36,9 +36,16 @@ jobs:
       actions: read
       security-events: write
 
+  audit:
+    name: Audit
+    needs: version
+    uses: ./.github/workflows/audit.yml
+    permissions:
+      contents: read
+
   release:
     name: Build and publish
-    needs: [version, codeql]
+    needs: [version, codeql, audit]
     runs-on: windows-latest
     timeout-minutes: 90
     permissions:
