@@ -212,7 +212,8 @@ impl Splitter {
 
     fn date_start(&mut self, title: &TrackTitle, frame: Option<u64>) {
         let is_switch_to = |p: &Pending| matches!(&p.change, Change::Content(Content::Track(t)) if &t.title == title);
-        if let Some(index) = self.pending.iter().position(is_switch_to) {
+        // SMTC only dates the track playing now: the latest change to it.
+        if let Some(index) = self.pending.iter().rposition(is_switch_to) {
             let mut pending = self.pending.remove(index);
             match frame {
                 Some(frame) if frame >= self.buffer_start => {
@@ -1020,6 +1021,32 @@ mod tests {
         assert_eq!(titles, ["One", "Two", "One"]);
         assert_eq!(ends[0].track.details.album.as_deref(), Some("First"));
         assert_eq!(ends[2].track.details.album, None);
+    }
+
+    #[test]
+    fn the_latest_play_of_a_title_is_dated() {
+        // One, Two, then One again, all pending when SMTC dates the second
+        // One: the first stays where it was.
+        let mut run = Run::new();
+        run.change(0, Change::Content(Content::Track(track("One"))));
+        run.change(2 * SECOND, Change::Content(Content::Track(track("Two"))));
+        run.change(4 * SECOND, Change::Content(Content::Track(track("One"))));
+        run.change(
+            4 * SECOND + SECOND / 2,
+            Change::TrackStart {
+                title: track("One").title,
+                frame: Some(4 * SECOND + SECOND / 2),
+            },
+        );
+        run.audio(&music(0.1, 2 * SECOND));
+        run.audio(&music(0.2, 2 * SECOND + SECOND / 2));
+        run.audio(&music(0.3, 5 * SECOND));
+        let tracks = summary(&run.finish());
+        let titles: Vec<&str> = tracks.iter().map(|t| t.0.as_str()).collect();
+        assert_eq!(titles, ["One", "Two", "One"]);
+        assert_eq!(tracks[0].1, vec![0.1]);
+        assert_eq!(tracks[1].1, vec![0.2]);
+        assert_eq!(tracks[2].1, vec![0.3]);
     }
 
     #[test]
