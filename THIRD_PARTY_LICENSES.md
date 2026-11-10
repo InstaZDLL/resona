@@ -3158,8 +3158,8 @@ third-party/chromium/LICENSE.
 ## GNU Lesser General Public License v3.0 only
 
 Used by:
-- [mp3lame-encoder 0.2.5](https://github.com/DoumanAsh/mp3lame-encoder)
-- [mp3lame-sys 0.1.11](https://github.com/DoumanAsh/mp3lame-sys)
+- [mp3lame-encoder 0.3.0](https://github.com/DoumanAsh/mp3lame-encoder)
+- [mp3lame-sys 0.2.0](https://github.com/DoumanAsh/mp3lame-sys)
 
 ```
 GNU LESSER GENERAL PUBLIC LICENSE
