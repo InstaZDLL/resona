@@ -13,7 +13,7 @@ anyhow = "1.0.104"
 arboard = { version = "3.6.1", default-features = false }
 crossbeam-channel = "0.5.17"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-rfd = { version = "0.17", default-features = false }
+rfd = { version = "0.18", default-features = false }
 # FemtoVG redraws the complete window after Windows discards an occluded
 # surface. Keep the software renderer available if OpenGL cannot start.
 slint = { version = "1.18", default-features = false, features = [
