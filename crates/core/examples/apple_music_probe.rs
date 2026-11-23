@@ -62,6 +62,38 @@ fn main() -> anyhow::Result<()> {
     // server started by svchost (`-Embedding`), outside AppleMusic.exe's
     // tree (measured 2026-11-23): the device and the capture are its.
     let target = probe::pid_of("AMPLibraryAgent.exe").unwrap_or(tree.root);
+    // RESONA_PROBE_DEVICE=<part of a name>: the agent plays on that device
+    // for the whole run (a multichannel cable, to see what Apple Music
+    // sends a surround layout), and goes back to its own at the end.
+    let _route_device = match std::env::var("RESONA_PROBE_DEVICE") {
+        Ok(wanted) => {
+            println!("\nrender devices:");
+            let mut chosen = None;
+            for (id, name) in audio_setup::render_devices()? {
+                let format = audio_setup::output_device(&id)?;
+                println!(
+                    "  {name} — {} Hz, {} channels (mask {:#x})",
+                    format.sample_rate, format.channels, format.channel_mask
+                );
+                if chosen.is_none() && name.contains(&wanted) {
+                    chosen = Some((id, name));
+                }
+            }
+            let (id, name) =
+                chosen.ok_or_else(|| anyhow::anyhow!("no render device named like {wanted:?}"))?;
+            let previous = resona_core::routing::spotify_endpoint(target)?;
+            resona_core::routing::route_spotify(target, Some(&id))?;
+            println!("agent routed to {name}");
+            // Its stream moves over: give it a moment.
+            std::thread::sleep(Duration::from_secs(2));
+            Some(probe::RouteBack {
+                pid: target,
+                previous,
+                armed: true,
+            })
+        }
+        Err(_) => None,
+    };
     let device = audio_setup::spotify_output_device(target)?;
     println!(
         "\noutput device: {} — {} Hz, {} bits, {} channels (mask {:#x}), volume {:.0} %{}{}",
@@ -111,6 +143,9 @@ fn main() -> anyhow::Result<()> {
     let mut analysis = BitAnalysis::default();
     let mut all_samples: Vec<f32> = Vec::new();
     let mut per_second = BitAnalysis::default();
+    // Beyond front left / right, on a multichannel device: what Dolby Atmos
+    // (or any surround mix) puts in the centre, LFE and surround channels.
+    let mut others_peak = 0.0_f32;
     let mut second_frames = 0_usize;
     let mut packet_count = 0_u64;
     let mut last_change: Option<(Option<probe::Session>, Option<String>)> = None;
@@ -187,12 +222,14 @@ fn main() -> anyhow::Result<()> {
                 analysis.feed(&packet.samples);
                 all_samples.extend_from_slice(&packet.samples);
                 per_second.feed(&packet.samples);
+                others_peak = others_peak.max(packet.other_channels_peak);
                 second_frames += packet.samples.len() / usize::from(CAPTURE_CHANNELS);
                 if second_frames >= device.sample_rate as usize {
                     println!(
-                        "[{:>6.1} s] audio peak {:>6.1} dBFS, {}",
+                        "[{:>6.1} s] audio peak {:>6.1} dBFS, other channels {:>6.1} dBFS, {}",
                         started.elapsed().as_secs_f32(),
                         per_second.peak_dbfs(),
+                        20.0 * others_peak.log10(),
                         match per_second.effective_depth() {
                             Some(bits) => format!("{bits}-bit exact"),
                             None if per_second.is_silent() => "silent".into(),
@@ -200,6 +237,7 @@ fn main() -> anyhow::Result<()> {
                         }
                     );
                     per_second = BitAnalysis::default();
+                    others_peak = 0.0;
                     second_frames = 0;
                 }
             }

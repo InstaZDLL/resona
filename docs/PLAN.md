@@ -313,6 +313,12 @@ Built (branch `feat/apple-music`, November 23, 2026):
 
 First real session (`record -- <dir> 4 --apple --keep-partial`, device at 48 kHz): two FLAC files at 24-bit / 48 kHz, tags from Deezer, synced lyrics found for one; the cut between the tracks landed on the silence 221 ms after the title estimate. *Tell Me I'm Wrong* (24/48) bit-perfect; *Tune in, Drop Out*, joined mid-track, came out processed — probably a 44.1 kHz track resampled to the device's 48 kHz, not checked.
 
+Dolby Atmos (2026-11-23, *Dolby Atmos: Always On*, Windows spatial sound off), measured with `apple_music_probe` (it prints the peak of the channels beyond front left / right each second; `RESONA_PROBE_DEVICE=<name>` plays the agent on another device for the run):
+
+- On the Logitech PRO X, set up as *7.1 Surround*: nothing beyond the front pair (-inf over 15 s); the front pair peaks around -12 dBFS. Still nothing after running Windows' Speaker Setup on it (7.1 Surround, full-range front pair) and playing a new Atmos track. Apple Music renders Atmos to stereo for it, probably because the endpoint is a headset (its form factor), not because of its channel layout.
+- On VB-Cable's `CABLE Input` set up as *7.1 Surround* (mask `0x63f`, 8 channels; *Configure* is greyed out on `CABLE In 16ch`): the centre, LFE and surround channels carry sound (-15 to -10 dBFS each second, front pair -10 to -7 dBFS). **Apple Music renders Atmos as 7.1 PCM on a speaker layout**: it can be recorded.
+- What it would take: the agent sent to a 7.1 cable (as the cable mode does), and the pipeline carrying 8 channels instead of the front pair — `format::front_stereo`, splitter frames, intermediate WAV, FLAC (8 channels, same order as `WAVEFORMATEXTENSIBLE`: FL FR FC LFE BL BR SL SR), analysis, playback (downmix for the headset). MP3 stays stereo. Atmos is lossy (Dolby Digital Plus JOC): a faithful capture of the render, never bit-perfect; the objects themselves are not reachable.
+
 Not measured yet: Hi-Res tracks (88.2–192 kHz), downloaded tracks, gapless albums (track boundaries without silence), the agent restarted mid-session, a track skipped or paused while recording, the settings window.
 
 ## Spotify Web API
