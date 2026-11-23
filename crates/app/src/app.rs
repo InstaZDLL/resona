@@ -976,23 +976,18 @@ fn describe(row: &mut TrackRow, fidelity: Fidelity, duration: Duration) {
 }
 
 /// Replaces the latest "recording" row of `title`, or adds `row` when
-/// there is none (a track discarded before it was announced).
-///
-/// The row keeps the app of the "recording" row it replaces: a track's
-/// result may reach the window after the user picked another app.
-fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, mut row: TrackRow) {
+/// there is none (a track discarded before it was announced). The row
+/// replaced is of the same app as `row`: the same title may be recording
+/// from another app by the time a late result arrives.
+fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, row: TrackRow) {
     let name = title.to_string();
-    let recording = (0..tracks.row_count()).rev().find_map(|i| {
-        tracks
-            .row_data(i)
-            .filter(|r| r.state == TrackState::Recording && r.title == name.as_str())
-            .map(|r| (i, r.player))
+    let index = (0..tracks.row_count()).rev().find(|&i| {
+        tracks.row_data(i).is_some_and(|r| {
+            r.state == TrackState::Recording && r.title == name.as_str() && r.player == row.player
+        })
     });
-    match recording {
-        Some((i, player)) => {
-            row.player = player;
-            tracks.set_row_data(i, row);
-        }
+    match index {
+        Some(i) => tracks.set_row_data(i, row),
         None => tracks.push(row),
     }
 }
@@ -1173,5 +1168,54 @@ fn error_notice(problem: &Problem) -> Notice {
         problem: failure,
         device: problem.subject.as_str().into(),
         detail: problem.detail.as_str().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn title(name: &str) -> TrackTitle {
+        TrackTitle {
+            artist: "Artist".into(),
+            title: name.into(),
+            title_extended: None,
+            separator: resona_core::spotify::title::TitleSeparator::None,
+        }
+    }
+
+    #[test]
+    fn a_late_result_replaces_the_row_of_its_own_app() {
+        // A Spotify recording stopped, then Apple Music records the same
+        // title before Spotify's result reaches the window.
+        let song = title("Song");
+        let tracks = VecModel::from(vec![
+            row("Spotify", &song, TrackState::Recording),
+            row("Apple Music", &song, TrackState::Recording),
+        ]);
+        replace_recording(&tracks, &song, row("Spotify", &song, TrackState::Saved));
+
+        let rows: Vec<TrackRow> = tracks.iter().collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            (rows[0].player.as_str(), rows[0].state),
+            ("Spotify", TrackState::Saved)
+        );
+        assert_eq!(
+            (rows[1].player.as_str(), rows[1].state),
+            ("Apple Music", TrackState::Recording)
+        );
+    }
+
+    #[test]
+    fn a_result_without_its_recording_row_is_added() {
+        let song = title("Song");
+        let tracks = VecModel::from(vec![row("Apple Music", &song, TrackState::Recording)]);
+        replace_recording(&tracks, &song, row("Spotify", &song, TrackState::Discarded));
+        assert_eq!(tracks.row_count(), 2);
+        assert_eq!(
+            tracks.row_data(0).map(|r| r.state),
+            Some(TrackState::Recording)
+        );
     }
 }
