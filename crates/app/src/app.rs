@@ -436,6 +436,7 @@ fn show_provider(window: &AppWindow, provider: Provider) {
                     n.kind,
                     Warning::SpotifyNormalize
                         | Warning::SpotifyFades
+                        | Warning::Processed
                         | Warning::SpotifyAutomix
                         | Warning::SpotifyNotLossless
                         | Warning::SpotifyVolume
@@ -962,15 +963,22 @@ fn describe(row: &mut TrackRow, fidelity: Fidelity, duration: Duration) {
 
 /// Replaces the latest "recording" row of `title`, or adds `row` when
 /// there is none (a track discarded before it was announced).
-fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, row: TrackRow) {
+///
+/// The row keeps the app of the "recording" row it replaces: a track's
+/// result may reach the window after the user picked another app.
+fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, mut row: TrackRow) {
     let name = title.to_string();
-    let index = (0..tracks.row_count()).rev().find(|&i| {
+    let recording = (0..tracks.row_count()).rev().find_map(|i| {
         tracks
             .row_data(i)
-            .is_some_and(|r| r.state == TrackState::Recording && r.title == name.as_str())
+            .filter(|r| r.state == TrackState::Recording && r.title == name.as_str())
+            .map(|r| (i, r.player))
     });
-    match index {
-        Some(i) => tracks.set_row_data(i, row),
+    match recording {
+        Some((i, player)) => {
+            row.player = player;
+            tracks.set_row_data(i, row);
+        }
         None => tracks.push(row),
     }
 }
