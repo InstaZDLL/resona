@@ -11,6 +11,7 @@ use resona_core::spotify::smtc::Smtc;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 
 use crate::AppWindow;
+use crate::mapping::{self, PROVIDERS};
 
 /// SMTC updates the art a moment after the title, and sometimes later
 /// still: looked at after each of these delays.
@@ -112,12 +113,19 @@ fn run(
             }
             let pixels = bytes.as_deref().and_then(decode);
             shown = bytes;
-            let _ = window.upgrade_in_event_loop(move |w| match pixels {
-                Some(pixels) => {
-                    w.set_now_cover(Image::from_rgba8(pixels));
-                    w.set_has_cover(true);
+            let _ = window.upgrade_in_event_loop(move |w| {
+                // Checked again where it lands: the user may have chosen
+                // another app between the fetch and this call.
+                if mapping::at(&PROVIDERS, w.get_provider_index()) != fetched_for {
+                    return;
                 }
-                None => w.set_has_cover(false),
+                match pixels {
+                    Some(pixels) => {
+                        w.set_now_cover(Image::from_rgba8(pixels));
+                        w.set_has_cover(true);
+                    }
+                    None => w.set_has_cover(false),
+                }
             });
         }
     }
