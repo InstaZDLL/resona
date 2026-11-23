@@ -49,12 +49,14 @@ fn apply(window: &AppWindow, mode: &str) {
         depth,
         tagged: true,
         format: "FLAC".into(),
+        player: "Spotify".into(),
         ..TrackRow::default()
     };
     let with_state = |title: &str, length: &str, state: TrackState| TrackRow {
         title: title.into(),
         length: length.into(),
         state,
+        player: "Spotify".into(),
         ..TrackRow::default()
     };
     let rows = if mode == "playlist" {

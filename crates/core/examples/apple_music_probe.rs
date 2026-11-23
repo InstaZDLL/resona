@@ -139,8 +139,16 @@ fn main() -> anyhow::Result<()> {
         if let Some(&(at, ref device)) = moves.last()
             && started.elapsed() >= Duration::from_secs(at)
         {
+            let back = *device == route_back.previous;
+            // Armed before leaving the previous device, cleared only once
+            // the agent is back on it: a failed return is retried on exit.
+            if !back {
+                route_back.armed = true;
+            }
             let result = resona_core::routing::route_spotify(target, device.as_deref());
-            route_back.armed = device.is_some() && *device != route_back.previous;
+            if back && result.is_ok() {
+                route_back.armed = false;
+            }
             println!(
                 "[{:>6.1} s] routed to {:?}: {result:?}",
                 started.elapsed().as_secs_f32(),

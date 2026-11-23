@@ -17,6 +17,8 @@ export struct TrackRow {
     reason: Reason,
     tagged: bool,
     format: string,
+    /// The app the track was recorded from, named in its badge.
+    player: string,
 }
 
 export enum Failure { other, spotify-not-running, spotify-cli-missing, spotify-command, not-a-link, list-not-started, lost-spotify, capture-not-started, unknown-track, cable-routing, headset-playback, encoding, default-device }
@@ -40,8 +42,6 @@ component Card inherits Rectangle {
 
 component QualityBadge inherits Rectangle {
     in property <TrackRow> track;
-    /// The app recorded, which made the change.
-    in property <string> player;
     property <string> label: root.track.state == TrackState.waiting ? ""
         : root.track.state == TrackState.recording ? @tr("recording…")
         : root.track.state == TrackState.already-recorded ? @tr("already recorded")
@@ -51,8 +51,8 @@ component QualityBadge inherits Rectangle {
             : root.track.reason == Reason.too-short ? @tr("too short")
             : @tr("already recorded"))
         : root.track.quality == Quality.bit-perfect ? @tr("bit-perfect {}-bit", root.track.depth)
-        : root.track.quality == Quality.near-transparent ? @tr("slightly changed by {}", root.player)
-        : root.track.quality == Quality.peak-limited ? @tr("peaks limited by {}", root.player)
+        : root.track.quality == Quality.near-transparent ? @tr("slightly changed by {}", root.track.player)
+        : root.track.quality == Quality.peak-limited ? @tr("peaks limited by {}", root.track.player)
         : root.track.quality == Quality.processed ? @tr("altered")
         : root.track.format;
     property <color> tint: root.track.state == TrackState.recording ? #e5484d
@@ -77,7 +77,6 @@ component QualityBadge inherits Rectangle {
 
 component TrackLine inherits Rectangle {
     in property <TrackRow> track;
-    in property <string> player;
     height: 40px;
     HorizontalLayout {
         padding-left: 12px;
@@ -110,10 +109,7 @@ component TrackLine inherits Rectangle {
         }
         VerticalLayout {
             alignment: center;
-            QualityBadge {
-                track: root.track;
-                player: root.player;
-            }
+            QualityBadge { track: root.track; }
         }
     }
     Rectangle {
@@ -566,10 +562,7 @@ export component AppWindow inherits Window {
                 }
                 if root.tracks.length > 0: ListView {
                     vertical-stretch: 1;
-                    for row in root.tracks: TrackLine {
-                        track: row;
-                        player: root.player;
-                    }
+                    for row in root.tracks: TrackLine { track: row; }
                 }
             }
         }

@@ -383,12 +383,15 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 /// Starts watching `provider`: its state goes to the window, its track
-/// changes to the cover loader.
+/// changes to the cover loader. On the UI thread: it starts a new
+/// [`WATCH_GENERATION`], so the watch it replaces is no longer heard.
 fn watch(
     provider: Provider,
     window: Weak<AppWindow>,
     cover: CoverLoader,
 ) -> anyhow::Result<Monitor> {
+    let generation = WATCH_GENERATION.get() + 1;
+    WATCH_GENERATION.set(generation);
     let (monitor, monitor_events) = Monitor::spawn(provider, || false)?;
     cover.refresh(provider);
     let (shown_tx, shown_rx) = crossbeam_channel::unbounded();
@@ -405,7 +408,7 @@ fn watch(
             ) {
                 cover.refresh(provider);
             }
-            if shown_tx.send((provider, event)).is_err() {
+            if shown_tx.send((generation, event)).is_err() {
                 break;
             }
         }
@@ -432,6 +435,7 @@ fn show_provider(window: &AppWindow, provider: Provider) {
                 !matches!(
                     n.kind,
                     Warning::SpotifyNormalize
+                        | Warning::SpotifyFades
                         | Warning::SpotifyAutomix
                         | Warning::SpotifyNotLossless
                         | Warning::SpotifyVolume
@@ -462,6 +466,9 @@ thread_local! {
     /// The list entry the latest playlist event was about: the recorder
     /// event that follows it (saved, discarded) belongs to that row.
     static LAST_ENTRY: Cell<Option<usize>> = const { Cell::new(None) };
+    /// The generation of the current monitor watch ([`watch`]): events of
+    /// an earlier one, still stopping, are ignored.
+    static WATCH_GENERATION: Cell<u64> = const { Cell::new(0) };
     /// The entries the last playlist run missed, for "retry".
     static MISSED: RefCell<(String, Vec<Entry>)> = RefCell::default();
 }
@@ -560,6 +567,8 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
                             .unwrap_or_default()
                             .into(),
                         state: TrackState::Waiting,
+                        // Playlists are Spotify's.
+                        player: "Spotify".into(),
                         ..TrackRow::default()
                     })
                     .collect::<Vec<_>>(),
@@ -744,10 +753,10 @@ fn forward<E: Send + 'static>(
     });
 }
 
-/// `provider` is the app the event is about: a monitor stopped after the
-/// user chose another app may still send one.
-fn on_monitor_event(window: &AppWindow, (provider, event): (Provider, MonitorEvent)) {
-    if crate::demo::active() || at(&mapping::PROVIDERS, window.get_provider_index()) != provider {
+/// `generation` is the watch the event comes from: a monitor stopped after
+/// the user chose another app (or the same one again) may still send one.
+fn on_monitor_event(window: &AppWindow, (generation, event): (u64, MonitorEvent)) {
+    if crate::demo::active() || generation != WATCH_GENERATION.get() {
         return;
     }
     let MonitorEvent::Status { event, .. } = event else {
@@ -839,10 +848,10 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             notices.set_vec(kept);
         }
         RecorderEvent::Recording(title) => {
-            tracks.push(row(&title, TrackState::Recording));
+            tracks.push(row(window, &title, TrackState::Recording));
         }
         RecorderEvent::AlreadyRecorded { title, .. } => {
-            tracks.push(row(&title, TrackState::AlreadyRecorded));
+            tracks.push(row(window, &title, TrackState::AlreadyRecorded));
         }
         RecorderEvent::Saved {
             title,
@@ -852,7 +861,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             tags,
             ..
         } => {
-            let mut saved = row(&title, TrackState::Saved);
+            let mut saved = row(window, &title, TrackState::Saved);
             describe(&mut saved, fidelity, duration);
             saved.tagged = tags.is_complete();
             saved.format = extension(&path).into();
@@ -868,7 +877,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             fidelity,
             duration,
         } => {
-            let mut discarded = row(&title, TrackState::Discarded);
+            let mut discarded = row(window, &title, TrackState::Discarded);
             describe(&mut discarded, fidelity, duration);
             discarded.reason = reason_of(reason);
             replace_recording(tracks, &title, discarded);
@@ -925,10 +934,13 @@ fn show_cable_as_default(window: &AppWindow, as_default: &CableAsDefault) {
     });
 }
 
-fn row(title: &TrackTitle, state: TrackState) -> TrackRow {
+/// A row for `title`, recorded from the app selected in `window` (the
+/// selection cannot change while recording).
+fn row(window: &AppWindow, title: &TrackTitle, state: TrackState) -> TrackRow {
     TrackRow {
         title: title.to_string().into(),
         state,
+        player: window.get_player(),
         ..TrackRow::default()
     }
 }
@@ -1071,6 +1083,10 @@ fn check_spotify_volume(window: Weak<AppWindow>) {
             return;
         }
         let _ = window.upgrade_in_event_loop(move |w| {
+            // Another app was selected while Spotify answered.
+            if !w.get_spotify_tools() {
+                return;
+            }
             let notices = w.get_notices();
             let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() else {
                 return;
