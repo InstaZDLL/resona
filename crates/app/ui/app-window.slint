@@ -453,7 +453,7 @@ export component AppWindow inherits Window {
         }
 
         // Playlist or album link
-        if !root.recording && root.spotify-tools: HorizontalLayout {
+        if !root.recording && !root.finishing && root.spotify-tools: HorizontalLayout {
             spacing: 8px;
             LineEdit {
                 placeholder-text: @tr("Spotify playlist or album link");
@@ -509,7 +509,7 @@ export component AppWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    if !root.recording && root.spotify-tools && root.missed-count > 0: Text {
+                    if !root.recording && !root.finishing && root.spotify-tools && root.missed-count > 0: Text {
                         text: @tr("Retry the {} missed", root.missed-count);
                         color: #0a84ff;
                         TouchArea {
@@ -625,7 +625,7 @@ export component AppWindow inherits Window {
                                 ComboBox {
                                     model: ["Spotify", "Apple Music"];
                                     current-index <=> root.provider-index;
-                                    enabled: !root.recording;
+                                    enabled: !root.recording && !root.finishing;
                                     horizontal-stretch: 1;
                                     selected => { root.provider-changed(self.current-index); }
                                 }

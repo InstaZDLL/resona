@@ -77,7 +77,7 @@ pub fn run() -> anyhow::Result<()> {
             let Some(window) = weak.upgrade() else { return };
             let provider = at(&mapping::PROVIDERS, index);
             let mut settings = settings.borrow_mut();
-            if window.get_recording() || settings.provider == provider {
+            if busy(&window) || settings.provider == provider {
                 return;
             }
             settings.provider = provider;
@@ -144,7 +144,7 @@ pub fn run() -> anyhow::Result<()> {
         let session = session.clone();
         move || {
             let Some(window) = weak.upgrade() else { return };
-            if window.get_recording() || !window.get_spotify_tools() {
+            if busy(&window) || !window.get_spotify_tools() {
                 return;
             }
             match SpotifyLink::parse(&window.get_playlist_link()) {
@@ -161,7 +161,7 @@ pub fn run() -> anyhow::Result<()> {
             let Some(window) = weak.upgrade() else { return };
             let (name, entries) = MISSED.with_borrow(Clone::clone);
             // Playlists are Spotify's: not with another app selected.
-            if !window.get_recording() && window.get_spotify_tools() && !entries.is_empty() {
+            if !busy(&window) && window.get_spotify_tools() && !entries.is_empty() {
                 session.start(&window, Some(Source::Entries { name, entries }));
             }
         }
@@ -759,6 +759,13 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
     settings.check_updates = window.get_check_updates();
     settings.lyrics = window.get_lyrics();
     settings.listen = window.get_listen();
+}
+
+/// A session is recording, or still finishing after a stop: no other may
+/// start, and the app may not change. `recording` alone is not enough: a
+/// playlist that ends on its own clears it while a stop is finishing.
+fn busy(window: &AppWindow) -> bool {
+    window.get_recording() || window.get_finishing()
 }
 
 /// Hands every event of `events` to `handle` on the UI thread, until the
