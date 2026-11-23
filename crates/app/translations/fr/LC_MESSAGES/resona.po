@@ -216,6 +216,9 @@ msgstr "Pour enregistrer sans perte : dans Apple Music, Audio sans perte activé
 msgid "⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off."
 msgstr "⚠ « {} » commence par un fondu ajouté par Spotify : le fondu enchaîné ou Automix est activé, et les changements de morceau ne sont pas sans perte. Spotify → Paramètres → Lecture → désactivez Fondu enchaîné et Automix."
 
+msgid "⚠ \"{}\" starts with a fade Apple Music added: crossfade is on, and track changes are not lossless. Apple Music → Settings → Playback → Crossfade songs → off."
+msgstr "⚠ « {} » commence par un fondu ajouté par Apple Music : le fondu enchaîné est activé, et les changements de morceau ne sont pas sans perte. Apple Music → Réglages → Lecture → Fondu enchaîné → désactivé."
+
 # Playlist mode
 msgid "Spotify playlist or album link"
 msgstr "Lien de playlist ou d'album Spotify"

@@ -108,10 +108,12 @@ fn split_title(title: &str) -> (String, Option<String>, TitleSeparator) {
         );
     }
     if let Some((title, extended)) = split_once_non_empty(title, " (") {
-        let extended = extended.replace(')', "");
+        // Only the closing parenthesis of the split: `Song (A) (B)` keeps
+        // `A) (B`, so that `full_title` gives the title back as it was.
+        let extended = extended.strip_suffix(')').unwrap_or(extended);
         return (
             title.to_owned(),
-            Some(extended),
+            Some(extended.to_owned()),
             TitleSeparator::Parenthesis,
         );
     }
@@ -181,6 +183,18 @@ mod tests {
         assert_eq!(t.title_extended.as_deref(), Some("Remastered 2011"));
         assert_eq!(t.separator, TitleSeparator::Parenthesis);
         assert_eq!(t.to_string(), "Artist Name - Song Title (Remastered 2011)");
+    }
+
+    #[test]
+    fn several_parentheses_come_back_as_they_were() {
+        for title in ["Song (feat. X) (Live)", "Song (A (B))"] {
+            let t = track_title("Artist", title);
+            assert_eq!(t.full_title(), title);
+        }
+        assert_ne!(
+            track_title("A", "Song (A) (B)"),
+            track_title("A", "Song (A (B))")
+        );
     }
 
     #[test]

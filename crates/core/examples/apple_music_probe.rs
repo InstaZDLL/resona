@@ -58,7 +58,11 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let device = audio_setup::spotify_output_device(tree.root)?;
+    // Apple Music plays through its library agent, an out-of-process COM
+    // server started by svchost (`-Embedding`), outside AppleMusic.exe's
+    // tree (measured 2026-11-23): the device and the capture are its.
+    let target = probe::pid_of("AMPLibraryAgent.exe").unwrap_or(tree.root);
+    let device = audio_setup::spotify_output_device(target)?;
     println!(
         "\noutput device: {} — {} Hz, {} bits, {} channels (mask {:#x}), volume {:.0} %{}{}",
         device.name,
@@ -97,10 +101,6 @@ fn main() -> anyhow::Result<()> {
         "\ncapturing at the device rate for {seconds} s; \
          change track, pause and resume meanwhile…"
     );
-    // Apple Music plays through its library agent, an out-of-process COM
-    // server started by svchost (`-Embedding`), outside AppleMusic.exe's
-    // tree (measured 2026-11-23).
-    let target = probe::pid_of("AMPLibraryAgent.exe").unwrap_or(tree.root);
     println!("capture target PID {target}");
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid: target,
@@ -126,6 +126,12 @@ fn main() -> anyhow::Result<()> {
     if cable.is_none() {
         moves.clear();
     }
+    // Sends the agent back however the probe ends (short run, error).
+    let mut route_back = probe::RouteBack {
+        pid: target,
+        previous,
+        armed: false,
+    };
     let started = Instant::now();
     let deadline = started + Duration::from_secs(seconds);
     let mut next_poll = started;
@@ -134,6 +140,7 @@ fn main() -> anyhow::Result<()> {
             && started.elapsed() >= Duration::from_secs(at)
         {
             let result = resona_core::routing::route_spotify(target, device.as_deref());
+            route_back.armed = device.is_some() && *device != route_back.previous;
             println!(
                 "[{:>6.1} s] routed to {:?}: {result:?}",
                 started.elapsed().as_secs_f32(),
@@ -325,6 +332,23 @@ mod probe {
             .pid()
             .as_u32();
         Some(pid)
+    }
+
+    /// Gives the agent its output device back when dropped, if `armed`.
+    pub struct RouteBack {
+        pub pid: u32,
+        pub previous: Option<String>,
+        pub armed: bool,
+    }
+
+    impl Drop for RouteBack {
+        fn drop(&mut self) {
+            if self.armed {
+                let result =
+                    resona_core::routing::route_spotify(self.pid, self.previous.as_deref());
+                println!("routed back to {:?}: {result:?}", self.previous);
+            }
+        }
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]

@@ -61,8 +61,8 @@ pub fn run() -> anyhow::Result<()> {
 
     // The app's state is shown whether recording or not. The cover art
     // follows the track the monitor reports.
-    let cover = CoverLoader::spawn(window.as_weak());
     let provider = settings.borrow().provider;
+    let cover = CoverLoader::spawn(window.as_weak(), provider);
     let monitor = Rc::new(RefCell::new(Some(watch(
         provider,
         window.as_weak(),
@@ -83,6 +83,7 @@ pub fn run() -> anyhow::Result<()> {
             settings.provider = provider;
             save(&settings);
             show_provider(&window, provider);
+            cover.select(provider);
             // Stopped on its own thread: it may be sleeping a poll.
             if let Some(previous) = monitor.borrow_mut().take() {
                 thread::spawn(move || previous.stop());
@@ -143,7 +144,7 @@ pub fn run() -> anyhow::Result<()> {
         let session = session.clone();
         move || {
             let Some(window) = weak.upgrade() else { return };
-            if window.get_recording() {
+            if window.get_recording() || !window.get_spotify_tools() {
                 return;
             }
             match SpotifyLink::parse(&window.get_playlist_link()) {
@@ -159,7 +160,8 @@ pub fn run() -> anyhow::Result<()> {
         move || {
             let Some(window) = weak.upgrade() else { return };
             let (name, entries) = MISSED.with_borrow(Clone::clone);
-            if !window.get_recording() && !entries.is_empty() {
+            // Playlists are Spotify's: not with another app selected.
+            if !window.get_recording() && window.get_spotify_tools() && !entries.is_empty() {
                 session.start(&window, Some(Source::Entries { name, entries }));
             }
         }

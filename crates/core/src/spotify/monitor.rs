@@ -25,6 +25,9 @@ pub struct Observation {
     pub root_pid: Option<u32>,
     pub window_title: Option<String>,
     pub smtc: Option<SmtcSnapshot>,
+    /// Reading SMTC failed: `smtc` is `None` for want of an answer, not
+    /// because the app has no session.
+    pub smtc_failed: bool,
 }
 
 /// Reads the app's state. Must live on a thread with COM initialised (MTA).
@@ -62,17 +65,17 @@ impl Poller {
                 .as_ref()
                 .and_then(|p| window::find_main_window(&p.all, class));
         }
-        let smtc = self.smtc.as_ref().and_then(|smtc| {
+        let read = self.smtc.as_ref().map(|smtc| {
             smtc.session(self.provider)
                 .inspect_err(|e| tracing::debug!("SMTC read failed: {e}"))
-                .ok()
-                .flatten()
         });
+        let smtc_failed = matches!(read, Some(Err(_)));
         Observation {
             provider: self.provider,
             root_pid: self.processes.as_ref().map(|p| p.root),
             window_title: window.map(|w| w.title),
-            smtc,
+            smtc: read.and_then(Result::ok).flatten(),
+            smtc_failed,
         }
     }
 }
@@ -171,6 +174,12 @@ fn run(
     let mut dated: Option<TrackTitle> = None;
     while !stop.load(Ordering::Relaxed) {
         let observation = poller.observe();
+        // Apple Music's track is known from SMTC alone: a failed read says
+        // nothing, and must not end the track (it would be cut in two).
+        if observation.smtc_failed && provider.title_mode() == TitleMode::Smtc {
+            thread::sleep(POLL_INTERVAL);
+            continue;
+        }
         let at = Instant::now();
         let current = status_of(&observation, audio_active(), &previous.content);
         for event in state::diff(&previous, &current) {

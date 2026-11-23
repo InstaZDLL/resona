@@ -413,7 +413,9 @@ export component AppWindow inherits Window {
                     text: notice.kind == Warning.enhancements ? @tr("⚠ Windows audio enhancements may be on for \"{}\": recordings would not be lossless. Settings → Sound → that device → Audio enhancements → Off.", notice.device)
                         : notice.kind == Warning.sample-rate ? @tr("⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings.", notice.device, notice.detail)
                         : notice.kind == Warning.cable-missing ? @tr("⚠ No virtual cable installed: {} stays on its device. Install VB-Cable or turn the option off in the settings.", root.player)
-                        : notice.kind == Warning.spotify-fades ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                        : notice.kind == Warning.spotify-fades ? (root.spotify-tools
+                            ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                            : @tr("⚠ \"{}\" starts with a fade Apple Music added: crossfade is on, and track changes are not lossless. Apple Music → Settings → Playback → Crossfade songs → off.", notice.detail))
                         : notice.kind == Warning.spotify-normalize ? @tr("⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off.")
                         : notice.kind == Warning.spotify-automix ? @tr("⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off.")
                         : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings.")
@@ -511,7 +513,7 @@ export component AppWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    if !root.recording && root.missed-count > 0: Text {
+                    if !root.recording && root.spotify-tools && root.missed-count > 0: Text {
                         text: @tr("Retry the {} missed", root.missed-count);
                         color: #0a84ff;
                         TouchArea {
