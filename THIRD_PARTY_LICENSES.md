@@ -3594,7 +3594,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License
 
 Used by:
-- [form_urlencoded 1.2.2](https://github.com/servo/rust-url)
+- [form_urlencoded 1.2.3](https://github.com/servo/rust-url)
 
 ```
 Copyright (c) 2013-2016 The rust-url developers
@@ -3631,7 +3631,7 @@ Used by:
 - [data-url 0.3.2](https://github.com/servo/rust-url)
 - [idna 1.1.0](https://github.com/servo/rust-url/)
 - [percent-encoding 2.3.2](https://github.com/servo/rust-url/)
-- [url 2.5.8](https://github.com/servo/rust-url)
+- [url 2.5.9](https://github.com/servo/rust-url)
 
 ```
 Copyright (c) 2013-2025 The rust-url developers
@@ -5849,7 +5849,7 @@ SOFTWARE.
 ## MIT License
 
 Used by:
-- [libc 0.2.189](https://github.com/rust-lang/libc)
+- [libc 0.2.191](https://github.com/rust-lang/libc)
 
 ```
 Copyright (c) The Rust Project Developers
@@ -6412,7 +6412,7 @@ SOFTWARE.
 ## MIT License
 
 Used by:
-- [rfd 0.17.2](https://github.com/PolyMeilex/rfd)
+- [rfd 0.18.0](https://github.com/PolyMeilex/rfd)
 
 ```
 MIT License
@@ -6472,7 +6472,7 @@ SOFTWARE.
 ## MIT License
 
 Used by:
-- [rfd 0.17.2](https://github.com/PolyMeilex/rfd)
+- [rfd 0.18.0](https://github.com/PolyMeilex/rfd)
 
 ```
 MIT License
@@ -7301,7 +7301,7 @@ THE SOFTWARE.
 ## MIT License
 
 Used by:
-- [sysinfo 0.40.1](https://github.com/GuillaumeGomez/sysinfo)
+- [sysinfo 0.40.4](https://github.com/GuillaumeGomez/sysinfo)
 
 ```
 The MIT License (MIT)
