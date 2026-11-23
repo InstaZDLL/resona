@@ -1,4 +1,4 @@
-//! Combining the window title, SMTC and audio activity into one status,
+//! Combining the window title, SMTC and audio activity into one status
 //! and diffing statuses into events. Pure logic, testable anywhere.
 
 use std::time::Duration;
@@ -57,6 +57,9 @@ impl Status {
 #[derive(Debug, Clone, Default)]
 pub struct SmtcView<'a> {
     pub title: &'a str,
+    /// Only read for Apple Music ([`classify_smtc`]): Spotify's artist
+    /// comes from its window title.
+    pub artist: &'a str,
     pub album: &'a str,
     pub album_artist: &'a str,
     pub track_number: Option<u32>,
@@ -102,6 +105,50 @@ pub fn classify(
         running: true,
         playing,
         content,
+    }
+}
+
+/// Apple Music's rules: SMTC alone names the track (its window is always
+/// titled `Apple Music`), and there are no ads. A paused track keeps its
+/// identity, so pause and resume are not track changes.
+///
+/// Apple Music puts `Artist — Album` in SMTC's artist field and leaves the
+/// album empty (measured 2026-11-23); the album artist holds the same
+/// string, so it is not used.
+pub fn classify_smtc(smtc: Option<&SmtcView>) -> Status {
+    let Some(smtc) = smtc.filter(|s| !s.title.trim().is_empty()) else {
+        return Status {
+            running: true,
+            playing: false,
+            content: Content::Nothing,
+        };
+    };
+    let (artist, album) = split_artist_album(smtc.artist);
+    let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_owned());
+    let track = Track {
+        title: title::track_title(artist, smtc.title.trim()),
+        details: TrackDetails {
+            album: album.map(str::to_owned).or_else(|| non_empty(smtc.album)),
+            album_artist: None,
+            track_number: smtc.track_number,
+            duration: smtc.duration,
+        },
+    };
+    Status {
+        running: true,
+        playing: smtc.playing,
+        content: Content::Track(track),
+    }
+}
+
+/// `Artist — Album` (an em dash between spaces) into its two parts, at the
+/// first dash: artist names hardly ever hold one, album titles sometimes do.
+pub fn split_artist_album(value: &str) -> (&str, Option<&str>) {
+    match value.split_once(" \u{2014} ") {
+        Some((artist, album)) if !artist.trim().is_empty() && !album.trim().is_empty() => {
+            (artist.trim(), Some(album.trim()))
+        }
+        _ => (value.trim(), None),
     }
 }
 
@@ -191,6 +238,7 @@ mod tests {
     fn smtc(title: &'static str, playing: bool) -> SmtcView<'static> {
         SmtcView {
             title,
+            artist: "Artist",
             album: "Album",
             album_artist: "Album Artist",
             track_number: Some(3),
@@ -326,6 +374,96 @@ mod tests {
             &playing.content,
         );
         assert_eq!(skipped_while_paused.content, Content::Nothing);
+    }
+
+    fn apple(title: &'static str, artist: &'static str, playing: bool) -> SmtcView<'static> {
+        // As measured: the album empty, the album artist a copy of the
+        // artist field, no track number, whole seconds.
+        SmtcView {
+            title,
+            artist,
+            album: "",
+            album_artist: artist,
+            track_number: None,
+            duration: Some(Duration::from_secs(151)),
+            playing,
+        }
+    }
+
+    #[test]
+    fn apple_music_artist_field_holds_the_album() {
+        assert_eq!(
+            split_artist_album("Beach Riot — Sub Atomic Party Cool"),
+            ("Beach Riot", Some("Sub Atomic Party Cool"))
+        );
+        assert_eq!(
+            split_artist_album("swim school — Heaven - Single"),
+            ("swim school", Some("Heaven - Single"))
+        );
+        assert_eq!(
+            split_artist_album("A — Album — Deluxe"),
+            ("A", Some("Album — Deluxe"))
+        );
+        assert_eq!(split_artist_album("Artist"), ("Artist", None));
+        assert_eq!(split_artist_album("Artist — "), ("Artist —", None));
+        assert_eq!(split_artist_album("A-ha - B"), ("A-ha - B", None));
+    }
+
+    #[test]
+    fn apple_music_track_comes_from_smtc() {
+        let status = classify_smtc(Some(&apple(
+            "Modern Dinosaur (Live)",
+            "Beach Riot — Sub Atomic Party Cool",
+            true,
+        )));
+        assert!(status.running && status.playing);
+        let track = track_of(&status);
+        assert_eq!(track.title.artist, "Beach Riot");
+        assert_eq!(track.title.title, "Modern Dinosaur");
+        assert_eq!(track.title.title_extended.as_deref(), Some("Live"));
+        assert_eq!(
+            track.details.album.as_deref(),
+            Some("Sub Atomic Party Cool")
+        );
+        assert_eq!(track.details.album_artist, None);
+        assert_eq!(track.details.duration, Some(Duration::from_secs(151)));
+    }
+
+    #[test]
+    fn apple_music_pause_and_resume_are_not_changes() {
+        let session = "Beach Riot — Tell Me I'm Wrong - Single";
+        let playing = classify_smtc(Some(&apple("Tell Me I'm Wrong", session, true)));
+        let paused = classify_smtc(Some(&apple("Tell Me I'm Wrong", session, false)));
+        assert_eq!(
+            diff(&playing, &paused),
+            [Event::PlayStateChanged { playing: false }]
+        );
+        assert_eq!(
+            diff(&paused, &playing),
+            [Event::PlayStateChanged { playing: true }]
+        );
+        let next = classify_smtc(Some(&apple(
+            "Heaven",
+            "swim school — Heaven - Single",
+            true,
+        )));
+        assert!(matches!(
+            diff(&playing, &next)[..],
+            [Event::ContentChanged { .. }]
+        ));
+    }
+
+    #[test]
+    fn apple_music_without_session_plays_nothing() {
+        for status in [
+            classify_smtc(None),
+            classify_smtc(Some(&apple(" ", "", true))),
+        ] {
+            assert_eq!(
+                (status.running, status.playing, status.content),
+                (true, false, Content::Nothing)
+            );
+        }
     }
 
     #[test]

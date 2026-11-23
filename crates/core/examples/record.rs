@@ -2,7 +2,7 @@
 //! settings (`%APPDATA%\Resona\settings.toml`), overridden by the flags.
 //!
 //! ```text
-//! cargo run -p resona-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable]
+//! cargo run -p resona-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable] [--listen] [--spotify|--apple]
 //!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
@@ -34,6 +34,15 @@ fn main() -> anyhow::Result<()> {
     }
     if args.iter().any(|a| a == "--cable") {
         settings.virtual_cable = true;
+    }
+    if args.iter().any(|a| a == "--listen") {
+        settings.listen = true;
+    }
+    if args.iter().any(|a| a == "--apple") {
+        settings.provider = resona_core::provider::Provider::AppleMusic;
+    }
+    if args.iter().any(|a| a == "--spotify") {
+        settings.provider = resona_core::provider::Provider::Spotify;
     }
     if args.iter().any(|a| a == "--keep-partial") {
         settings.keep_partial = true;
@@ -70,18 +79,21 @@ fn main() -> anyhow::Result<()> {
         let Ok(event) = events.recv_timeout(left) else {
             break;
         };
-        print_event(event);
+        print_event(settings.provider, event);
     }
     println!("stopping, finishing the current track…");
     recorder.stop();
     while let Ok(event) = events.try_recv() {
-        print_event(event);
+        print_event(settings.provider, event);
     }
     Ok(())
 }
 
 #[cfg(windows)]
-fn print_event(event: resona_core::recorder::engine::RecorderEvent) {
+fn print_event(
+    provider: resona_core::provider::Provider,
+    event: resona_core::recorder::engine::RecorderEvent,
+) {
     use std::time::Duration;
 
     use resona_core::analysis::Fidelity;
@@ -104,10 +116,10 @@ fn print_event(event: resona_core::recorder::engine::RecorderEvent) {
     match event {
         RecorderEvent::CaptureStarted { pid, device } => {
             println!(
-                "capture started: Spotify PID {pid}, {} ({} Hz, {} channels)",
+                "capture started: {provider} PID {pid}, {} ({} Hz, {} channels)",
                 device.name, device.sample_rate, device.channels
             );
-            for issue in device.lossless_issues() {
+            for issue in device.lossless_issues(provider) {
                 match issue {
                     SetupIssue::Enhancements => println!(
                         "  ⚠ Windows audio enhancements may be on (an effect is installed and not \

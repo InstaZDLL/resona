@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use resona_core::analysis::Fidelity;
 use resona_core::audio_setup::{CableAsDefault, SetupIssue};
 use resona_core::problem::{Problem, ProblemKind};
+use resona_core::provider::Provider;
 use resona_core::recorder::engine::{DiscardReason, Recorder, RecorderEvent};
 use resona_core::recorder::playlist_session::{
     Entry, EntryState, PlaylistEvent, PlaylistSession, Source,
@@ -58,31 +59,40 @@ pub fn run() -> anyhow::Result<()> {
     window.set_notices(ModelRc::from(notices.clone()));
     check_spotify_settings(&notices, &settings.borrow());
 
-    // Spotify's state is shown whether recording or not.
-    let (monitor, monitor_events) = Monitor::spawn(|| false)?;
-    // The cover art follows the track the monitor reports.
+    // The app's state is shown whether recording or not. The cover art
+    // follows the track the monitor reports.
     let cover = CoverLoader::spawn(window.as_weak());
-    cover.refresh();
-    let (shown_tx, shown_rx) = crossbeam_channel::unbounded();
-    thread::spawn(move || {
-        for event in monitor_events {
-            if matches!(
-                event,
-                MonitorEvent::Status {
-                    event: Event::ContentChanged { .. }
-                        | Event::DetailsUpdated(_)
-                        | Event::RunningChanged { .. },
-                    ..
-                }
-            ) {
-                cover.refresh();
+    let provider = settings.borrow().provider;
+    let monitor = Rc::new(RefCell::new(Some(watch(
+        provider,
+        window.as_weak(),
+        cover.clone(),
+    )?)));
+
+    window.on_provider_changed({
+        let weak = window.as_weak();
+        let settings = Rc::clone(&settings);
+        let monitor = Rc::clone(&monitor);
+        move |index| {
+            let Some(window) = weak.upgrade() else { return };
+            let provider = at(&mapping::PROVIDERS, index);
+            let mut settings = settings.borrow_mut();
+            if window.get_recording() || settings.provider == provider {
+                return;
             }
-            if shown_tx.send(event).is_err() {
-                break;
+            settings.provider = provider;
+            save(&settings);
+            show_provider(&window, provider);
+            // Stopped on its own thread: it may be sleeping a poll.
+            if let Some(previous) = monitor.borrow_mut().take() {
+                thread::spawn(move || previous.stop());
+            }
+            match watch(provider, window.as_weak(), cover.clone()) {
+                Ok(watching) => *monitor.borrow_mut() = Some(watching),
+                Err(e) => tracing::warn!("cannot watch {provider}: {e}"),
             }
         }
     });
-    forward(shown_rx, window.as_weak(), on_monitor_event);
 
     let running: Rc<RefCell<Option<Running>>> = Rc::default();
     let started: Rc<Cell<Option<Instant>>> = Rc::default();
@@ -240,7 +250,9 @@ pub fn run() -> anyhow::Result<()> {
             });
         }
     });
-    check_spotify_volume(window.as_weak());
+    if settings.borrow().provider.has_spotify_tools() {
+        check_spotify_volume(window.as_weak());
+    }
 
     window.on_open_url(|url| {
         let _ = std::process::Command::new("explorer")
@@ -362,8 +374,71 @@ pub fn run() -> anyhow::Result<()> {
     if let Some(running) = running.borrow_mut().take() {
         running.stop();
     }
-    monitor.stop();
+    if let Some(monitor) = monitor.borrow_mut().take() {
+        monitor.stop();
+    }
     Ok(())
+}
+
+/// Starts watching `provider`: its state goes to the window, its track
+/// changes to the cover loader.
+fn watch(
+    provider: Provider,
+    window: Weak<AppWindow>,
+    cover: CoverLoader,
+) -> anyhow::Result<Monitor> {
+    let (monitor, monitor_events) = Monitor::spawn(provider, || false)?;
+    cover.refresh(provider);
+    let (shown_tx, shown_rx) = crossbeam_channel::unbounded();
+    thread::spawn(move || {
+        for event in monitor_events {
+            if matches!(
+                event,
+                MonitorEvent::Status {
+                    event: Event::ContentChanged { .. }
+                        | Event::DetailsUpdated(_)
+                        | Event::RunningChanged { .. },
+                    ..
+                }
+            ) {
+                cover.refresh(provider);
+            }
+            if shown_tx.send((provider, event)).is_err() {
+                break;
+            }
+        }
+    });
+    forward(shown_rx, window, on_monitor_event);
+    Ok(monitor)
+}
+
+/// The texts and sections that depend on the app recorded, and its state
+/// reset until its monitor reports.
+fn show_provider(window: &AppWindow, provider: Provider) {
+    window.set_provider_index(index_of(&mapping::PROVIDERS, &provider));
+    window.set_player(provider.name().into());
+    window.set_spotify_tools(provider.has_spotify_tools());
+    window.set_spotify_state(SpotifyState::NotRunning);
+    window.set_has_cover(false);
+    show_now_playing(window, None, None);
+    // Spotify's settings warnings do not apply to another app.
+    let notices = window.get_notices();
+    if let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() {
+        let kept: Vec<Notice> = notices
+            .iter()
+            .filter(|n| {
+                !matches!(
+                    n.kind,
+                    Warning::SpotifyNormalize
+                        | Warning::SpotifyAutomix
+                        | Warning::SpotifyNotLossless
+                        | Warning::SpotifyVolume
+                        | Warning::SampleRate
+                )
+            })
+            .collect();
+        notices.set_vec(kept);
+    }
 }
 
 /// What the record button stops.
@@ -411,7 +486,9 @@ impl Session {
         }
         self.notices.set_vec(Vec::new());
         check_spotify_settings(&self.notices, &self.settings.borrow());
-        check_spotify_volume(window.as_weak());
+        if self.settings.borrow().provider.has_spotify_tools() {
+            check_spotify_volume(window.as_weak());
+        }
         window.set_saved_count(0);
         window.set_missed_count(0);
         window.set_playlist_name(SharedString::new());
@@ -612,6 +689,7 @@ fn save(settings: &Settings) {
 }
 
 fn show_settings(window: &AppWindow, settings: &Settings) {
+    show_provider(window, settings.provider);
     window.set_output_dir(settings.output_dir.display().to_string().into());
     window.set_quality_index(index_of(&mapping::QUALITIES, &settings.spotify_quality));
     window.set_format_index(index_of(&mapping::FORMATS, &settings.format));
@@ -664,8 +742,10 @@ fn forward<E: Send + 'static>(
     });
 }
 
-fn on_monitor_event(window: &AppWindow, event: MonitorEvent) {
-    if crate::demo::active() {
+/// `provider` is the app the event is about: a monitor stopped after the
+/// user chose another app may still send one.
+fn on_monitor_event(window: &AppWindow, (provider, event): (Provider, MonitorEvent)) {
+    if crate::demo::active() || at(&mapping::PROVIDERS, window.get_provider_index()) != provider {
         return;
     }
     let MonitorEvent::Status { event, .. } = event else {
@@ -737,7 +817,8 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
                 .filter(|n| !matches!(n.kind, Warning::Enhancements | Warning::SampleRate))
                 .collect();
             let name: SharedString = device.name.as_str().into();
-            for issue in device.lossless_issues() {
+            let provider = at(&mapping::PROVIDERS, window.get_provider_index());
+            for issue in device.lossless_issues(provider) {
                 kept.push(match issue {
                     SetupIssue::Enhancements => Notice {
                         kind: Warning::Enhancements,
@@ -883,6 +964,9 @@ fn replace_recording(tracks: &VecModel<TrackRow>, title: &TrackTitle, row: Track
 /// Warns about Spotify settings that alter the sound, from its `prefs`
 /// file: before recording rather than after.
 fn check_spotify_settings(notices: &VecModel<Notice>, settings: &Settings) {
+    if !settings.provider.has_spotify_tools() {
+        return;
+    }
     let Some(prefs) = SpotifyPrefs::load() else {
         return;
     };
@@ -940,7 +1024,7 @@ struct ClipboardWatch {
 
 impl ClipboardWatch {
     fn offer_link(&mut self, window: &AppWindow) {
-        if window.get_recording() || !in_foreground() {
+        if window.get_recording() || !window.get_spotify_tools() || !in_foreground() {
             return;
         }
         if self.clipboard.is_none() {

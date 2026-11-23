@@ -87,6 +87,18 @@ pub fn parse(window_title: &str) -> TitleState {
     })
 }
 
+/// A track named by its artist and full title, for players whose window
+/// title does not name it (Apple Music): the title is split the same way.
+pub fn track_title(artist: &str, full_title: &str) -> TrackTitle {
+    let (title, title_extended, separator) = split_title(full_title);
+    TrackTitle {
+        artist: artist.to_owned(),
+        title,
+        title_extended,
+        separator,
+    }
+}
+
 fn split_title(title: &str) -> (String, Option<String>, TitleSeparator) {
     if let Some((title, extended)) = split_once_non_empty(title, " - ") {
         return (

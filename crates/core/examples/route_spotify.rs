@@ -7,11 +7,12 @@
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
-    use resona_core::spotify::process::SpotifyProcesses;
+    use resona_core::provider::Provider;
+    use resona_core::spotify::process::AppProcesses;
     use resona_core::{Error, audio_setup, routing};
 
     let _ = wasapi::initialize_mta();
-    let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
+    let processes = AppProcesses::find(Provider::Spotify).ok_or(Error::SpotifyNotRunning)?;
     let cable = audio_setup::virtual_cable()?;
 
     match std::env::args().nth(1).as_deref() {

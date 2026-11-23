@@ -18,7 +18,8 @@ fn main() -> anyhow::Result<()> {
     use resona_core::capture::{CaptureConfig, ProcessCapture};
     use resona_core::encode::{Quantizer, flac, wav::CaptureWav};
     use resona_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
-    use resona_core::spotify::process::SpotifyProcesses;
+    use resona_core::provider::Provider;
+    use resona_core::spotify::process::AppProcesses;
 
     // flacenc logs its worker statistics at INFO.
     tracing_subscriber::fmt()
@@ -30,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     let intermediate = output.with_extension("capture.wav");
 
     let _ = wasapi::initialize_mta();
-    let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
+    let processes = AppProcesses::find(Provider::Spotify).ok_or(Error::SpotifyNotRunning)?;
     let device = audio_setup::spotify_output_device(processes.root)?;
     println!(
         "output device: {} — {} Hz, {} bits, {} channels (mask {:#x}){}, volume {:.0} % ({:.1} dB){}{}{}",
@@ -82,8 +83,9 @@ fn main() -> anyhow::Result<()> {
         pid: processes.root,
         source_channels: channels,
         channel_mask: mask,
+        sample_rate: CAPTURE_SAMPLE_RATE,
     })?;
-    let mut wav = CaptureWav::create(&intermediate)?;
+    let mut wav = CaptureWav::create(&intermediate, CAPTURE_SAMPLE_RATE)?;
     let mut analysis = BitAnalysis::default();
     let mut discontinuities = 0;
     let mut other_channels_peak = 0.0_f32;

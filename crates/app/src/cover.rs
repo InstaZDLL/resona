@@ -1,10 +1,11 @@
-//! The current track's cover art, as Spotify gives it to Windows' media
-//! overlay (SMTC). Fetched on its own thread: SMTC calls block.
+//! The current track's cover art, as the music app gives it to Windows'
+//! media overlay (SMTC). Fetched on its own thread: SMTC calls block.
 
 use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use resona_core::provider::Provider;
 use resona_core::spotify::smtc::Smtc;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 
@@ -14,8 +15,9 @@ use crate::AppWindow;
 /// still: looked at after each of these delays.
 const CHECKS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(2000)];
 
+#[derive(Clone)]
 pub struct CoverLoader {
-    requests: Sender<()>,
+    requests: Sender<Provider>,
 }
 
 impl CoverLoader {
@@ -39,21 +41,22 @@ impl CoverLoader {
         Self { requests }
     }
 
-    /// The track may have changed: look at the cover again.
-    pub fn refresh(&self) {
-        let _ = self.requests.send(());
+    /// The track of `provider` may have changed: look at the cover again.
+    pub fn refresh(&self, provider: Provider) {
+        let _ = self.requests.send(provider);
     }
 }
 
-fn run(smtc: &Smtc, requests: &Receiver<()>, window: &Weak<AppWindow>) {
+fn run(smtc: &Smtc, requests: &Receiver<Provider>, window: &Weak<AppWindow>) {
     let mut shown: Option<Vec<u8>> = None;
-    while requests.recv().is_ok() {
+    while let Ok(mut provider) = requests.recv() {
         let mut checks = CHECKS.iter().peekable();
         let mut waited = Duration::ZERO;
         while let Some(&at) = checks.next() {
             // A newer request starts the checks over.
             match requests.recv_timeout(at - waited) {
-                Ok(()) => {
+                Ok(newer) => {
+                    provider = newer;
                     checks = CHECKS.iter().peekable();
                     waited = Duration::ZERO;
                     continue;
@@ -61,7 +64,7 @@ fn run(smtc: &Smtc, requests: &Receiver<()>, window: &Weak<AppWindow>) {
                 Err(RecvTimeoutError::Disconnected) => return,
                 Err(RecvTimeoutError::Timeout) => waited = at,
             }
-            let bytes = smtc.spotify_thumbnail().ok().flatten();
+            let bytes = smtc.thumbnail(provider).ok().flatten();
             if bytes == shown {
                 continue;
             }

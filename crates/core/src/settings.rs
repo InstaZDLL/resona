@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::format::{OutputFormat, SpotifyQuality};
+use crate::provider::Provider;
 use crate::recorder::library::ExistingTracks;
 use crate::recorder::naming::Layout;
 
@@ -13,6 +14,8 @@ use crate::recorder::naming::Layout;
 #[serde(default)]
 pub struct Settings {
     pub output_dir: PathBuf,
+    /// The app recorded.
+    pub provider: Provider,
     /// The quality chosen in Spotify's own settings: Resona cannot read
     /// it, and it decides the natural output format.
     pub spotify_quality: Quality,
@@ -74,6 +77,7 @@ impl Default for Settings {
             .unwrap_or_else(|| PathBuf::from("."));
         Self {
             output_dir: music.join("Resona"),
+            provider: Provider::Spotify,
             spotify_quality: Quality::Lossless,
             format: SpotifyQuality::Lossless.default_output(),
             min_duration_secs: 30,
@@ -152,6 +156,7 @@ impl Settings {
     pub fn recorder_config(&self) -> crate::recorder::engine::RecorderConfig {
         crate::recorder::engine::RecorderConfig {
             output_dir: self.output_dir.clone(),
+            provider: self.provider,
             keep_partial: self.keep_partial,
             min_duration: Duration::from_secs(self.min_duration_secs),
             format: self.format,
@@ -210,6 +215,7 @@ mod tests {
                 prefix: Prefix::TrackNumber,
             },
             existing: ExistingTracks::KeepBoth,
+            provider: Provider::AppleMusic,
             ..Settings::default()
         };
         settings.save_to(&path).unwrap();
@@ -219,6 +225,7 @@ mod tests {
         assert_eq!(loaded, settings);
         assert!(text.contains("format = \"mp3:192\""), "{text}");
         assert!(text.contains("folders = \"artist-album\""), "{text}");
+        assert!(text.contains("provider = \"apple-music\""), "{text}");
     }
 
     #[test]
@@ -228,6 +235,8 @@ mod tests {
         let loaded = Settings::load_from(&path);
         std::fs::remove_file(&path).unwrap();
         assert!(!loaded.mute_ads);
+        // Settings saved before Apple Music: Spotify, as before.
+        assert_eq!(loaded.provider, Provider::Spotify);
         assert_eq!(loaded.format, Settings::default().format);
     }
 

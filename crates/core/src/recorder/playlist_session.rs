@@ -180,6 +180,9 @@ impl<'a> Run<'a> {
             name: name.clone(),
             entries: entries.clone(),
         });
+        // Playlists are played by Spotify's command-line tool, whatever app
+        // the free recording follows.
+        config.provider = crate::provider::Provider::Spotify;
         // Spotify moves past a track already in the folder instead of
         // playing it through for nothing.
         if config.existing == ExistingTracks::Skip {

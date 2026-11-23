@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Resona, a Rust rewrite of Spytify (renamed 2026-10-05), is a Spotify recorder for Windows: it captures the Spotify desktop client's audio, splits it into tracks, skips ads (Free tier) and writes tagged MP3 / WAV / FLAC files. New over the C# original (`E:\Workspace\spy-spotify`, port it from there): **Spotify Lossless** rips to FLAC 16/24-bit.
+Resona, a Rust rewrite of Spytify (renamed 2026-10-05), is a Spotify and Apple Music recorder for Windows: it captures the desktop client's audio, splits it into tracks, skips ads (Free tier) and writes tagged MP3 / WAV / FLAC files. New over the C# original (`E:\Workspace\spy-spotify`, port it from there): **Spotify Lossless** rips to FLAC 16/24-bit.
 
 **`docs/PLAN.md` is the roadmap** (phases, open decisions, C# → Rust module mapping, the Lossless design). Read it before starting a phase and record findings (especially Phase 0 measurements) there.
 
@@ -30,7 +30,7 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 
 ## Layout
 
-- `crates/core` (`resona-core`) — engine, no UI: `spotify` (process, window title, SMTC → `state::Status` → `monitor` events), `capture` (WASAPI process loopback thread), `analysis` (bit-transparency), `encode` (intermediate float WAV, then FLAC / WAV / MP3; `Quantizer` dithers only when reducing depth), `format`. Windows-only modules are behind `#[cfg(windows)]` so the crate still builds and tests elsewhere.
+- `crates/core` (`resona-core`) — engine, no UI: `provider` (pure: what differs between Spotify and Apple Music), `spotify` (process, window title, SMTC → `state::Status` → `monitor` events, for either app despite its name), `capture` (WASAPI process loopback thread), `analysis` (bit-transparency), `encode` (intermediate float WAV, then FLAC / WAV / MP3; `Quantizer` dithers only when reducing depth), `format`. Windows-only modules are behind `#[cfg(windows)]` so the crate still builds and tests elsewhere.
 - Decision logic is kept pure and unit-tested (`spotify::title`, `spotify::state`, `analysis`); Windows modules only gather inputs. Keep new logic on the pure side.
 - `metadata/` — `deezer` (blocking client, no key), `lookup` (pure: a Deezer hit is used only if title, artist and duration all agree), `tags` (`TrackTags`, written through lofty's concrete `VorbisComments`). Tags are best-effort: a failed lookup keeps Spotify's own details, never fails a recording.
 - `recorder/` — `splitter` (pure: holds audio back 3 s and places each change at the frame it happened), `clock`, `naming`, `engine` (Windows: capture + monitor + splitter + FLAC encoder thread).
@@ -39,8 +39,8 @@ Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
 
 ## Invariants
 
-- **Capture is per process tree, never system loopback.** `ProcessCapture::start` targets the *root* Spotify PID and always includes its children. Windows has no "this process alone" mode, and wasapi's `include_tree: false` means *everything except* the tree — never use it.
-- **Capture format is 44.1 kHz f32 in the output device's own channel layout** (`audio_setup::OutputDevice::{channels, channel_mask}`), reduced to the front L/R pair by `format::front_stereo`. Never let Windows downmix (a 7.1 virtual-surround headset made every capture non-transparent) and never resample in our pipeline — both destroy Lossless bit-transparency. 44.1 kHz is Spotify's native rate in every tier.
+- **Capture is per process tree, never system loopback.** `ProcessCapture::start` targets the *root* PID of `Provider::audio_process_name` and always includes its children. For Apple Music that is `AMPLibraryAgent.exe`, a COM server outside `AppleMusic.exe`'s tree: capturing `AppleMusic.exe` records silence. Windows has no "this process alone" mode, and wasapi's `include_tree: false` means *everything except* the tree — never use it.
+- **Capture format is f32 at `Provider::fixed_rate()` (44.1 kHz, Spotify) or the device's rate (Apple Music), in the output device's own channel layout** (`audio_setup::OutputDevice::{channels, channel_mask}`), reduced to the front L/R pair by `format::front_stereo`. Never let Windows downmix (a 7.1 virtual-surround headset made every capture non-transparent) and never resample in our pipeline — both destroy Lossless bit-transparency. 44.1 kHz is Spotify's native rate in every tier; Apple Music's tracks are 44.1 or 48 kHz (more in Hi-Res), bit-perfect only when the device runs at the track's rate.
 - **Capture first, encode after the track ends** from the intermediate float WAV (`encode::wav::CaptureWav`). The capture thread only reads WASAPI packets and sends them on a channel: no encoding or file I/O there.
 - **Audio enhancements are a hint, read from the registry** (`audio_setup::enhancements_active`, `FxProperties`; `IMMDevice::OpenPropertyStore` never shows them). The registry and the Settings switch have disagreed, and G HUB rewrites these properties: the per-track `analysis::Fidelity` is the verdict, never the registry.
 - **Don't infer play state from packets.** Depending on the build, paused Spotify sends either nothing or a stream of silent packets (seen with the Store build); `silent`-flagged packets are turned into zeros. Silence proves nothing about bit-transparency (`BitAnalysis::is_silent`).

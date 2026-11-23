@@ -100,7 +100,7 @@ mod tests {
         let samples: Vec<f32> = (0..44_100 * 2 * 3)
             .map(|i| ((i / 2) as f32 * 440.0 * std::f32::consts::TAU / 44_100.0).sin() * 0.5)
             .collect();
-        let mut writer = CaptureWav::create(&wav).unwrap();
+        let mut writer = CaptureWav::create(&wav, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&samples).unwrap();
         writer.finalize().unwrap();
 

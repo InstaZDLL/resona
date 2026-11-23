@@ -23,11 +23,11 @@ msgstr "trop court"
 msgid "bit-perfect {}-bit"
 msgstr "bit-perfect {} bits"
 
-msgid "slightly changed by Spotify"
-msgstr "légèrement modifié par Spotify"
+msgid "slightly changed by {}"
+msgstr "légèrement modifié par {}"
 
-msgid "peaks limited by Spotify"
-msgstr "crêtes limitées par Spotify"
+msgid "peaks limited by {}"
+msgstr "crêtes limitées par {}"
 
 msgid "altered"
 msgstr "modifié"
@@ -36,8 +36,8 @@ msgstr "modifié"
 msgid "⚙ Settings"
 msgstr "⚙ Réglages"
 
-msgid "Spotify is not running"
-msgstr "Spotify n'est pas lancé"
+msgid "{} is not running"
+msgstr "{} n'est pas lancé"
 
 msgid "Advertisement"
 msgstr "Publicité"
@@ -54,11 +54,11 @@ msgstr "⏸ En pause"
 msgid "Ad, not recorded"
 msgstr "Pub, non enregistrée"
 
-msgid "Spotify is open"
-msgstr "Spotify est ouvert"
+msgid "{} is open"
+msgstr "{} est ouvert"
 
-msgid "Start Spotify to record"
-msgstr "Lancez Spotify pour enregistrer"
+msgid "Start {} to record"
+msgstr "Lancez {} pour enregistrer"
 
 # Notices
 msgid "⚠ Windows audio enhancements may be on for \"{}\": recordings would not be lossless. Settings → Sound → that device → Audio enhancements → Off."
@@ -67,8 +67,8 @@ msgstr "⚠ Les améliorations audio de Windows sont peut-être actives sur « {
 msgid "⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings."
 msgstr "⚠ « {} » fonctionne à {} Hz. Réglez-le sur 44100 Hz (Paramètres → Son → ce périphérique → Format) pour enregistrer sans perte."
 
-msgid "⚠ No virtual cable installed: Spotify stays on its device. Install VB-Cable or turn the option off in the settings."
-msgstr "⚠ Aucun câble virtuel installé : Spotify reste sur son périphérique. Installez VB-Cable ou désactivez l'option dans les réglages."
+msgid "⚠ No virtual cable installed: {} stays on its device. Install VB-Cable or turn the option off in the settings."
+msgstr "⚠ Aucun câble virtuel installé : {} reste sur son périphérique. Installez VB-Cable ou désactivez l'option dans les réglages."
 
 msgid "⚠ The virtual cable is the Windows default output device: nothing can be heard."
 msgstr "⚠ Le câble virtuel est le périphérique de sortie par défaut de Windows : plus rien ne s'entend."
@@ -104,6 +104,9 @@ msgstr "Réglages"
 
 msgid "Recording"
 msgstr "Enregistrement"
+
+msgid "Music app"
+msgstr "Application de musique"
 
 msgid "Folder"
 msgstr "Dossier"
@@ -177,17 +180,17 @@ msgstr "Le remplacer"
 msgid "Keep both"
 msgstr "Garder les deux"
 
-msgid "Make Spotify skip tracks already recorded"
-msgstr "Faire passer à Spotify les morceaux déjà enregistrés"
+msgid "Make {} skip tracks already recorded"
+msgstr "Faire passer à {} les morceaux déjà enregistrés"
 
 msgid "Audio output"
 msgstr "Sortie audio"
 
-msgid "Play Spotify through a virtual cable"
-msgstr "Faire passer Spotify par un câble virtuel"
+msgid "Play {} through a virtual cable"
+msgstr "Faire passer {} par un câble virtuel"
 
-msgid "Hear Spotify while recording"
-msgstr "Entendre Spotify pendant l'enregistrement"
+msgid "Hear {} while recording"
+msgstr "Entendre {} pendant l'enregistrement"
 
 msgid "Get VB-Cable…"
 msgstr "Télécharger VB-Cable…"
@@ -206,6 +209,9 @@ msgstr "Langue"
 
 msgid "For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect."
 msgstr "Pour enregistrer sans perte : Spotify en qualité Lossless, volume au maximum, normalisation, égaliseur, fondu enchaîné et Automix désactivés ; améliorations audio de Windows désactivées et périphérique de sortie à 44100 Hz. Chaque morceau enregistré indique s'il est sorti bit-perfect."
+
+msgid "For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge). Each saved track says whether it came out bit-perfect."
+msgstr "Pour enregistrer sans perte : dans Apple Music, Audio sans perte activé et Diffusion en continu réglée sur Lossless, volume au maximum, Égaliseur de volume, Optimiseur de son, fondu enchaîné et Dolby Atmos désactivés ; améliorations audio de Windows et égaliseur du casque désactivés, et périphérique de sortie à la fréquence du morceau (44100 ou 48000 Hz, indiquée par le badge Lossless d'Apple Music). Chaque morceau enregistré indique s'il est sorti bit-perfect."
 
 msgid "⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off."
 msgstr "⚠ « {} » commence par un fondu ajouté par Spotify : le fondu enchaîné ou Automix est activé, et les changements de morceau ne sont pas sans perte. Spotify → Paramètres → Lecture → désactivez Fondu enchaîné et Automix."
@@ -226,11 +232,11 @@ msgstr "{} · {} / {}"
 msgid "Retry the {} missed"
 msgstr "Réessayer les {} manquants"
 
-msgid "⏸ Paused: press play in Spotify"
-msgstr "⏸ En pause : lancez la lecture dans Spotify"
+msgid "⏸ Paused: press play in {}"
+msgstr "⏸ En pause : lancez la lecture dans {}"
 
-msgid "Play something in Spotify"
-msgstr "Lancez une lecture dans Spotify"
+msgid "Play something in {}"
+msgstr "Lancez une lecture dans {}"
 
 msgid "⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off."
 msgstr "⚠ La normalisation du volume de Spotify est activée : elle modifie le son. Spotify → Paramètres → Lecture → Normaliser le volume → désactivé."
@@ -241,8 +247,8 @@ msgstr "⚠ Automix de Spotify est activé : il mixe les transitions des playlis
 msgid "⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings."
 msgstr "⚠ Spotify ne lit pas en Lossless. Spotify → Paramètres → Qualité audio → Lossless, ou changez la qualité Spotify dans les réglages de Resona."
 
-msgid "⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings."
-msgstr "⚠ Morceaux modifiés entre Spotify et l'enregistrement : {} (dernier : « {} »). Vérifiez le volume de Spotify et les réglages audio."
+msgid "⚠ Tracks altered on their way out of {}: {} (last: \"{}\"). Check its volume and the audio settings."
+msgstr "⚠ Morceaux modifiés entre {} et l'enregistrement : {} (dernier : « {} »). Vérifiez son volume et les réglages audio."
 
 msgid "⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless."
 msgstr "⚠ Le volume de Spotify est à {} % : les enregistrements sont atténués et ne sont pas sans perte."
@@ -273,8 +279,8 @@ msgid "Source code on GitHub"
 msgstr "Code source sur GitHub"
 
 # Errors
-msgid "⚠ Spotify is not running: start it, then try again."
-msgstr "⚠ Spotify n'est pas lancé : lancez-le, puis réessayez."
+msgid "⚠ {} is not running: start it, then try again."
+msgstr "⚠ {} n'est pas lancé : lancez-le, puis réessayez."
 
 msgid "⚠ Spotify's command-line tool (spotify_cli) is missing: playlist mode, exact tags and the volume check need a recent Spotify build."
 msgstr "⚠ L'outil en ligne de commande de Spotify (spotify_cli) est absent : le mode playlist, les tags exacts et la vérification du volume demandent une version récente de Spotify."
@@ -291,17 +297,17 @@ msgstr "⚠ Spotify n'a pas lancé la playlist. Vérifiez qu'il est ouvert et co
 msgid "⚠ Spotify stopped answering: the playlist was stopped."
 msgstr "⚠ Spotify ne répond plus : la playlist a été arrêtée."
 
-msgid "⚠ The capture did not start: is Spotify running on this computer?"
-msgstr "⚠ La capture n'a pas démarré : Spotify tourne-t-il bien sur cet ordinateur ?"
+msgid "⚠ The capture did not start: is {} running on this computer?"
+msgstr "⚠ La capture n'a pas démarré : {} tourne-t-il bien sur cet ordinateur ?"
 
 msgid "⚠ Spotify does not know this track."
 msgstr "⚠ Spotify ne connaît pas ce morceau."
 
-msgid "⚠ Spotify could not be sent to the virtual cable: it stays on its device."
-msgstr "⚠ Spotify n'a pas pu être envoyé vers le câble virtuel : il reste sur son périphérique."
+msgid "⚠ {} could not be sent to the virtual cable: it stays on its device."
+msgstr "⚠ {} n'a pas pu être envoyé vers le câble virtuel : il reste sur son périphérique."
 
-msgid "⚠ Spotify could not be played back on the headset."
-msgstr "⚠ Le son de Spotify n'a pas pu être rejoué dans le casque."
+msgid "⚠ {} could not be played back on the headset."
+msgstr "⚠ Le son de {} n'a pas pu être rejoué dans le casque."
 
 msgid "⚠ \"{}\" could not be saved."
 msgstr "⚠ « {} » n'a pas pu être enregistré."

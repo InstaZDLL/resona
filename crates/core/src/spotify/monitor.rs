@@ -1,5 +1,5 @@
-//! Polling Spotify and publishing [`Event`]s, the equivalent of the C#
-//! `SpotifyHandler` timers.
+//! Polling the music app and publishing [`Event`]s, the equivalent of the
+//! C# `SpotifyHandler` timers.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,11 +8,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crossbeam_channel::{Receiver, Sender};
 
-use super::process::SpotifyProcesses;
+use super::process::AppProcesses;
 use super::smtc::{Smtc, SmtcSnapshot};
 use super::state::{self, Content, Event, SmtcView, Status};
 use super::title::TrackTitle;
 use super::window;
+use crate::provider::{Provider, TitleMode};
 
 /// Same period as the C# watcher.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -20,60 +21,59 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// One poll's raw inputs, kept for diagnostics (`spotify_probe` example).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
+    pub provider: Provider,
     pub root_pid: Option<u32>,
     pub window_title: Option<String>,
     pub smtc: Option<SmtcSnapshot>,
 }
 
-/// Reads Spotify's state. Must live on a thread with COM initialised (MTA).
+/// Reads the app's state. Must live on a thread with COM initialised (MTA).
 pub struct Poller {
-    processes: Option<SpotifyProcesses>,
+    provider: Provider,
+    processes: Option<AppProcesses>,
     smtc: Option<Smtc>,
 }
 
 impl Poller {
-    pub fn new() -> Self {
+    pub fn new(provider: Provider) -> Self {
         let smtc = Smtc::new()
             .inspect_err(|e| tracing::warn!("SMTC unavailable, window title only: {e}"))
             .ok();
         Self {
+            provider,
             processes: None,
             smtc,
         }
     }
 
     pub fn observe(&mut self) -> Observation {
+        let class = self.provider.window_class_prefix();
         let mut window = self
             .processes
             .as_ref()
-            .and_then(|p| window::find_main_window(&p.all));
+            .and_then(|p| window::find_main_window(&p.all, class));
         if window.is_none() {
             // Enumerating every process is the costly part of a poll; redo it
-            // only when the cached PIDs no longer own a window (Spotify
+            // only when the cached PIDs no longer own a window (the app
             // restarted, or was not running).
-            self.processes = SpotifyProcesses::find();
+            self.processes = AppProcesses::find(self.provider);
             window = self
                 .processes
                 .as_ref()
-                .and_then(|p| window::find_main_window(&p.all));
+                .and_then(|p| window::find_main_window(&p.all, class));
         }
         let smtc = self.smtc.as_ref().and_then(|smtc| {
-            smtc.spotify()
+            smtc.session(self.provider)
                 .inspect_err(|e| tracing::debug!("SMTC read failed: {e}"))
                 .ok()
                 .flatten()
         });
         Observation {
+            provider: self.provider,
             root_pid: self.processes.as_ref().map(|p| p.root),
             window_title: window.map(|w| w.title),
             smtc,
         }
-    }
-}
-
-impl Default for Poller {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -84,18 +84,22 @@ pub fn status_of(observation: &Observation, audio_active: bool, previous: &Conte
     }
     let smtc = observation.smtc.as_ref().map(|s| SmtcView {
         title: &s.title,
+        artist: &s.artist,
         album: &s.album,
         album_artist: &s.album_artist,
         track_number: s.track_number,
         duration: s.duration,
         playing: s.playing,
     });
-    state::classify(
-        observation.window_title.as_deref(),
-        smtc.as_ref(),
-        audio_active,
-        previous,
-    )
+    match observation.provider.title_mode() {
+        TitleMode::WindowTitle => state::classify(
+            observation.window_title.as_deref(),
+            smtc.as_ref(),
+            audio_active,
+            previous,
+        ),
+        TitleMode::Smtc => state::classify_smtc(smtc.as_ref()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,10 +123,11 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    /// `audio_active` tells whether Spotify is producing sound right now;
-    /// it is how an ad behind an idle window title is recognised. The
-    /// recorder answers it from the capture stream.
+    /// Watches `provider`. `audio_active` tells whether the app is producing
+    /// sound right now; it is how a Spotify ad behind an idle window title
+    /// is recognised. The recorder answers it from the capture stream.
     pub fn spawn(
+        provider: Provider,
         audio_active: impl Fn() -> bool + Send + 'static,
     ) -> std::io::Result<(Self, Receiver<MonitorEvent>)> {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
@@ -130,7 +135,7 @@ impl Monitor {
         let thread_stop = Arc::clone(&stop);
         let thread = thread::Builder::new()
             .name("resona-monitor".into())
-            .spawn(move || run(&events_tx, &thread_stop, &audio_active))?;
+            .spawn(move || run(provider, &events_tx, &thread_stop, &audio_active))?;
         Ok((
             Self {
                 stop,
@@ -154,9 +159,14 @@ impl Drop for Monitor {
     }
 }
 
-fn run(events: &Sender<MonitorEvent>, stop: &AtomicBool, audio_active: &dyn Fn() -> bool) {
+fn run(
+    provider: Provider,
+    events: &Sender<MonitorEvent>,
+    stop: &AtomicBool,
+    audio_active: &dyn Fn() -> bool,
+) {
     let _ = wasapi::initialize_mta();
-    let mut poller = Poller::new();
+    let mut poller = Poller::new(provider);
     let mut previous = Status::NOT_RUNNING;
     let mut dated: Option<TrackTitle> = None;
     while !stop.load(Ordering::Relaxed) {
@@ -168,7 +178,8 @@ fn run(events: &Sender<MonitorEvent>, stop: &AtomicBool, audio_active: &dyn Fn()
                 return;
             }
         }
-        if let Content::Track(track) = &current.content
+        if provider.dates_track_start()
+            && let Content::Track(track) = &current.content
             && dated.as_ref() != Some(&track.title)
             && let Some(started_at) = observation
                 .smtc

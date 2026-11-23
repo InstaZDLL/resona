@@ -1,7 +1,7 @@
 //! The recording session: capture + monitor in, one FLAC per track out.
 //!
 //! Three threads besides the caller's: the capture thread (WASAPI), the
-//! monitor thread (Spotify state), and this engine's own, which owns the
+//! monitor thread (the app's state), and this engine's own, which owns the
 //! [`Splitter`] and the temporary WAV of the track being recorded. Encoding
 //! runs on a fourth thread so a slow FLAC never holds up the capture.
 
@@ -30,10 +30,11 @@ use crate::metadata::name_match::title_similarity;
 use crate::metadata::{self, TagsOutcome};
 use crate::playback::Playback;
 use crate::problem::{Problem, ProblemKind};
+use crate::provider::Provider;
 use crate::routing;
 use crate::spotify::cli::{NowPlaying, SpotifyCli};
 use crate::spotify::monitor::{Monitor, MonitorEvent};
-use crate::spotify::process::SpotifyProcesses;
+use crate::spotify::process::{self, AppProcesses};
 use crate::spotify::smtc::Smtc;
 use crate::spotify::state::{Content, Event, Track};
 use crate::spotify::title::TrackTitle;
@@ -51,6 +52,8 @@ const TEMP_DIR: &str = ".resona-tmp";
 
 #[derive(Debug, Clone)]
 pub struct RecorderConfig {
+    /// The app recorded.
+    pub provider: Provider,
     pub output_dir: PathBuf,
     /// Keep tracks recorded only in part (joined late, skipped).
     pub keep_partial: bool,
@@ -68,13 +71,14 @@ pub struct RecorderConfig {
     pub skip_existing_in_spotify: bool,
     /// Mute Spotify in the Windows mixer while an ad plays (Free tier).
     pub mute_ads: bool,
-    /// Send Spotify to a virtual audio cable (VB-Cable) instead of the
-    /// headset or speakers, so their settings (rate, enhancements,
-    /// surround) no longer touch the recording. Off takes Spotify back
-    /// off the cable.
+    /// Send the app to a virtual audio cable (VB-Cable) instead of the
+    /// headset or speakers, so their settings (enhancements, equalizer,
+    /// surround) no longer touch the recording. Off takes the app back off
+    /// the cable. Spotify's cable is set to 44.1 kHz; for Apple Music the
+    /// cable's own rate must match the tracks, as a headset's would.
     pub virtual_cable: bool,
     /// With [`Self::virtual_cable`]: play what is recorded on the default
-    /// device, to hear Spotify. Off, Spotify is silent while recording.
+    /// device, to hear the app. Off, it is silent while recording.
     pub listen: bool,
     /// Write lyrics (LRCLIB, synced when available) as a `.lrc` file next
     /// to each track.
@@ -183,10 +187,12 @@ impl Drop for Recorder {
 }
 
 struct Capture {
+    /// The process captured with its tree ([`AppProcesses::audio_root`]).
     pid: u32,
     capture: ProcessCapture,
     packets: Receiver<Packet>,
     device: OutputDevice,
+    sample_rate: u32,
 }
 
 fn start_capture(
@@ -194,38 +200,50 @@ fn start_capture(
     cable: &mut Option<CableRoute>,
     events: &Sender<RecorderEvent>,
 ) -> Result<Capture> {
-    let processes = SpotifyProcesses::find().ok_or(Error::SpotifyNotRunning)?;
+    let provider = config.provider;
+    let processes = AppProcesses::find(provider).ok_or(Error::SpotifyNotRunning)?;
+    // Apple Music's library agent starts with the first track played.
+    let pid = processes.audio_root.ok_or(Error::SpotifyNotRunning)?;
+    // Windows keeps the output device per application: the cable is set
+    // for the process that renders the sound.
     if !config.virtual_cable {
-        leave_cable(processes.root);
+        leave_cable(pid);
     } else if cable.is_none() {
-        *cable = CableRoute::enter(processes.root, events);
+        *cable = CableRoute::enter(provider, pid, events);
     }
-    let device = audio_setup::spotify_output_device(processes.root)?;
+    let device = audio_setup::spotify_output_device(pid)?;
+    // Never resampled on our side: at the app's own rate, else at the
+    // device's, which is what Apple Music's mixed stream comes at.
+    let sample_rate = provider.fixed_rate().unwrap_or(device.sample_rate);
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
-        pid: processes.root,
+        pid,
         source_channels: device.channels,
         channel_mask: device.channel_mask,
+        sample_rate,
     })?;
     Ok(Capture {
-        pid: processes.root,
+        pid,
         capture,
         packets,
         device,
+        sample_rate,
     })
 }
 
 /// Spotify sent to the virtual cable for the length of a recording: it
 /// plays there silently, out of the headset's chain.
 struct CableRoute {
+    provider: Provider,
     cable_id: String,
-    /// Spotify's own output device before (`None`: the default one).
+    /// The app's own output device before (`None`: the default one).
     previous: Option<String>,
 }
 
 impl CableRoute {
-    /// Sets the cable up (44.1 kHz) and sends Spotify (root process `pid`)
-    /// to it. `None`, with an event saying why, when that fails.
-    fn enter(pid: u32, events: &Sender<RecorderEvent>) -> Option<Self> {
+    /// Sets the cable up (44.1 kHz for Spotify) and sends `provider`'s
+    /// sound (its [`AppProcesses::audio_root`] `pid`) to it. `None`, with an
+    /// event saying why, when that fails.
+    fn enter(provider: Provider, pid: u32, events: &Sender<RecorderEvent>) -> Option<Self> {
         let cable_id = match audio_setup::virtual_cable() {
             Ok(Some((id, _))) => id,
             Ok(None) => {
@@ -242,13 +260,16 @@ impl CableRoute {
         }
         // VB-Cable installs at 48 kHz: Spotify would be resampled on its
         // way in. If this fails, the capture's setup warning says so.
-        if audio_setup::output_device(&cable_id).is_ok_and(|d| d.resamples())
-            && let Err(e) = device_config::set_sample_rate(&cable_id, CAPTURE_SAMPLE_RATE)
+        // Apple Music has no single rate: the cable stays at the rate the
+        // user gave it, like a headset.
+        if let Some(rate) = provider.fixed_rate()
+            && audio_setup::output_device(&cable_id).is_ok_and(|d| d.sample_rate != rate)
+            && let Err(e) = device_config::set_sample_rate(&cable_id, rate)
         {
-            tracing::warn!("cannot set the cable to 44.1 kHz: {e}");
+            tracing::warn!("cannot set the cable to {rate} Hz: {e}");
         }
         let current = routing::spotify_endpoint(pid).unwrap_or_else(|e| {
-            tracing::warn!("cannot read Spotify's output device: {e}");
+            tracing::warn!("cannot read {provider}'s output device: {e}");
             None
         });
         // Already on the cable: left there by a session that did not end
@@ -261,27 +282,36 @@ impl CableRoute {
             )));
             return None;
         }
-        Some(Self { cable_id, previous })
+        Some(Self {
+            provider,
+            cable_id,
+            previous,
+        })
     }
 }
 
-/// Gives Spotify its device back, however the session ends. Windows keeps
-/// the choice per executable, so this needs a running Spotify; otherwise
-/// the next session puts it back.
+/// Gives the app its device back, however the session ends. Windows keeps
+/// the choice per executable, so this needs the app running (Apple Music:
+/// its library agent); otherwise the next session puts it back.
 impl Drop for CableRoute {
     fn drop(&mut self) {
-        if let Some(processes) = SpotifyProcesses::find()
-            && let Err(e) = routing::route_spotify(processes.root, self.previous.as_deref())
+        if let Some(pid) = process::find_audio_pid(self.provider)
+            && let Err(e) = routing::route_spotify(pid, self.previous.as_deref())
         {
-            tracing::warn!("cannot give Spotify its output device back: {e}");
+            tracing::warn!("cannot give {} its output device back: {e}", self.provider);
         }
     }
 }
 
-/// Plays the capture on the default device, Spotify itself being silent in
-/// the cable. `None`, with an event saying why, when that fails.
-fn listen(cable_id: &str, events: &Sender<RecorderEvent>) -> Option<(Playback, Sender<Vec<f32>>)> {
-    match Playback::start(cable_id) {
+/// Plays the capture (at `sample_rate`) on the default device, the app
+/// itself being silent in the cable. `None`, with an event saying why, when
+/// that fails.
+fn listen(
+    cable_id: &str,
+    sample_rate: u32,
+    events: &Sender<RecorderEvent>,
+) -> Option<(Playback, Sender<Vec<f32>>)> {
+    match Playback::start(cable_id, sample_rate) {
         Ok(playback) => Some(playback),
         // The cable is the default device: [`RecorderEvent::CableIsDefault`]
         // has said so already.
@@ -296,7 +326,8 @@ fn listen(cable_id: &str, events: &Sender<RecorderEvent>) -> Option<(Playback, S
     }
 }
 
-/// Takes Spotify off the virtual cable if a session left it there.
+/// Takes the app (process `pid`) off the virtual cable if a session left it
+/// there.
 fn leave_cable(pid: u32) {
     let Ok(Some((cable_id, _))) = audio_setup::virtual_cable() else {
         return;
@@ -310,7 +341,9 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
     let _ = wasapi::initialize_mta();
     let sound = Arc::new(AtomicBool::new(false));
     let monitor_sound = Arc::clone(&sound);
-    let (monitor, monitor_events) = Monitor::spawn(move || monitor_sound.load(Ordering::Relaxed))?;
+    let (monitor, monitor_events) = Monitor::spawn(config.provider, move || {
+        monitor_sound.load(Ordering::Relaxed)
+    })?;
     let (jobs_tx, jobs_rx) = crossbeam_channel::unbounded::<Job>();
     let library = Arc::new(Mutex::new(Library::scan(&config.output_dir)));
     let encoder = {
@@ -322,9 +355,14 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
             .spawn(move || encode_jobs(&config, &library, &jobs_rx, &events))?
     };
 
+    // Until a capture says otherwise (Apple Music: the device's rate).
+    let sample_rate = config.provider.fixed_rate().unwrap_or(CAPTURE_SAMPLE_RATE);
     let mut session = Session {
-        splitter: Splitter::new(CAPTURE_SAMPLE_RATE),
-        clock: FrameClock::new(CAPTURE_SAMPLE_RATE),
+        splitter: Splitter::new(sample_rate),
+        clock: FrameClock::new(sample_rate),
+        sample_rate,
+        content: None,
+        playing_now: None,
         writer: None,
         skipping: None,
         temp_dir: config.output_dir.join(TEMP_DIR),
@@ -334,23 +372,48 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
         library,
         smtc: None,
         ad_muted: false,
-        playing: PlayingWatch::spawn(),
+        playing: if config.provider.has_spotify_tools() {
+            PlayingWatch::spawn()
+        } else {
+            None
+        },
     };
     let mut capture: Option<Capture> = None;
     let mut last_attempt: Option<Instant> = None;
+    let mut last_alive_check = Instant::now();
     // Dropped when the session ends, error or not: Spotify leaves the cable.
     let mut cable: Option<CableRoute> = None;
-    let mut playback: Option<(Playback, Sender<Vec<f32>>)> = None;
+    let mut playback: Option<(Playback, Sender<Vec<f32>>, u32)> = None;
 
     loop {
+        // A capture of a process that quit hears nothing: Apple Music's
+        // agent is restarted by COM (seen when its streaming quality
+        // changed), with no error from the capture.
+        if last_alive_check.elapsed() >= CAPTURE_RETRY {
+            last_alive_check = Instant::now();
+            if let Some(lost) = capture.take_if(|c| !process::is_running(c.pid)) {
+                let _ = lost.capture.stop();
+                let _ = events.send(RecorderEvent::CaptureLost);
+            }
+        }
         if capture.is_none() && last_attempt.is_none_or(|t| t.elapsed() >= CAPTURE_RETRY) {
             last_attempt = Some(Instant::now());
             if let Ok(started) = start_capture(config, &mut cable, events) {
+                session.set_sample_rate(started.sample_rate)?;
+                // Played back at the capture's rate: a new one (Apple Music,
+                // the cable's rate changed) restarts the playback.
+                if playback
+                    .as_ref()
+                    .is_some_and(|(_, _, rate)| *rate != started.sample_rate)
+                {
+                    playback = None;
+                }
                 if config.listen
                     && playback.is_none()
                     && let Some(route) = &cable
                 {
-                    playback = listen(&route.cable_id, events);
+                    playback = listen(&route.cable_id, started.sample_rate, events)
+                        .map(|(p, to_headset)| (p, to_headset, started.sample_rate));
                 }
                 let _ = events.send(RecorderEvent::CaptureStarted {
                     pid: started.pid,
@@ -367,7 +430,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
             recv(packets) -> packet => match packet {
                 Ok(packet) => {
                     sound.store(packet.samples.iter().any(|&s| s != 0.0), Ordering::Relaxed);
-                    if let Some((_, to_headset)) = &playback {
+                    if let Some((_, to_headset, _)) = &playback {
                         let _ = to_headset.send(packet.samples.clone());
                     }
                     session.audio(&packet)?;
@@ -410,6 +473,8 @@ struct Writer {
 struct Job {
     ended: Ended,
     wav: PathBuf,
+    /// Of the capture, which the WAV is at.
+    sample_rate: u32,
     analysis: BitAnalysis,
     /// The catalogue entry played, for exact tags.
     uri: Option<String>,
@@ -471,6 +536,12 @@ impl Drop for PlayingWatch {
 struct Session {
     splitter: Splitter,
     clock: FrameClock,
+    /// Of the capture the splitter and the clock count frames at.
+    sample_rate: u32,
+    /// The last content and play state reported, replayed into a new
+    /// splitter when the rate changes.
+    content: Option<Content>,
+    playing_now: Option<bool>,
     writer: Option<Writer>,
     /// The current track is already recorded and is not written.
     skipping: Option<TrackTitle>,
@@ -511,9 +582,18 @@ impl Session {
                     self.set_ad_muted(matches!(current, Content::Ad));
                 }
                 let change = match &event {
-                    Event::ContentChanged { current, .. } => Some(Change::Content(current.clone())),
-                    Event::PlayStateChanged { playing } => Some(Change::Playing(*playing)),
-                    Event::DetailsUpdated(track) => Some(Change::Details(track.clone())),
+                    Event::ContentChanged { current, .. } => {
+                        self.content = Some(current.clone());
+                        Some(Change::Content(current.clone()))
+                    }
+                    Event::PlayStateChanged { playing } => {
+                        self.playing_now = Some(*playing);
+                        Some(Change::Playing(*playing))
+                    }
+                    Event::DetailsUpdated(track) => {
+                        self.content = Some(Content::Track(track.clone()));
+                        Some(Change::Details(track.clone()))
+                    }
                     Event::RunningChanged { .. } => None,
                 };
                 let _ = self.events.send(RecorderEvent::Spotify(event));
@@ -555,7 +635,7 @@ impl Session {
                     self.writer = Some(Writer {
                         uri: self.playing.as_ref().and_then(|w| w.uri_for(&track.title)),
                         title: track.title,
-                        wav: CaptureWav::create(&path)?,
+                        wav: CaptureWav::create(&path, self.sample_rate)?,
                         path,
                         analysis: BitAnalysis::default(),
                     });
@@ -576,6 +656,7 @@ impl Session {
                         let _ = self.jobs.send(Job {
                             ended,
                             wav: writer.path,
+                            sample_rate: self.sample_rate,
                             analysis: writer.analysis,
                             uri: writer.uri,
                         });
@@ -588,6 +669,28 @@ impl Session {
 }
 
 impl Session {
+    /// A capture at another rate than the frames counted so far (Apple
+    /// Music, its device switched between 44.1 and 48 kHz): the track in
+    /// progress ends there, and a new splitter goes on with what plays.
+    fn set_sample_rate(&mut self, sample_rate: u32) -> Result<()> {
+        if sample_rate == self.sample_rate {
+            return Ok(());
+        }
+        let actions = self.splitter.finish();
+        self.apply(actions)?;
+        self.sample_rate = sample_rate;
+        self.splitter = Splitter::new(sample_rate);
+        self.clock = FrameClock::new(sample_rate);
+        // In the order the monitor reports them.
+        if let Some(playing) = self.playing_now {
+            self.splitter.change(0, Change::Playing(playing));
+        }
+        if let Some(content) = self.content.clone() {
+            self.splitter.change(0, Change::Content(content));
+        }
+        Ok(())
+    }
+
     fn already_recorded(&self, title: &TrackTitle) -> Option<PathBuf> {
         let library = self.library.lock().unwrap_or_else(|e| e.into_inner());
         library.find(title).map(PathBuf::from)
@@ -602,7 +705,7 @@ impl Session {
         }
         self.smtc
             .as_ref()
-            .and_then(|smtc| smtc.skip_spotify().ok())
+            .and_then(|smtc| smtc.skip(self.config.provider).ok())
             .unwrap_or(false)
     }
 
@@ -610,10 +713,10 @@ impl Session {
         if muted == self.ad_muted {
             return;
         }
-        let Some(processes) = SpotifyProcesses::find() else {
+        let Some(processes) = AppProcesses::find(self.config.provider) else {
             return;
         };
-        match audio_setup::set_spotify_muted(&processes.all, muted) {
+        match audio_setup::set_spotify_muted(&processes.audio_all, muted) {
             Ok(()) => {
                 self.ad_muted = muted;
                 let _ = self.events.send(RecorderEvent::AdMuted(muted));
@@ -649,9 +752,13 @@ fn encode_jobs(
         deezer: DeezerClient::new()
             .inspect_err(|e| tracing::warn!("no Deezer client: {e}"))
             .ok(),
-        spotify: SpotifyCli::find()
-            .inspect_err(|e| tracing::warn!("no Spotify catalogue: {e}"))
-            .ok(),
+        spotify: if config.provider.has_spotify_tools() {
+            SpotifyCli::find()
+                .inspect_err(|e| tracing::warn!("no Spotify catalogue: {e}"))
+                .ok()
+        } else {
+            None
+        },
         lyrics: if config.lyrics {
             LyricsClient::new()
                 .inspect_err(|e| tracing::warn!("no lyrics client: {e}"))
@@ -690,11 +797,11 @@ fn encode(
     job: &Job,
 ) -> Result<RecorderEvent> {
     let title = job.ended.track.title.clone();
-    let duration = job.ended.duration(CAPTURE_SAMPLE_RATE);
+    let duration = job.ended.duration(job.sample_rate);
     let fidelity = job.analysis.fidelity();
     let discard = if duration < config.min_duration {
         Some(DiscardReason::TooShort)
-    } else if !config.keep_partial && job.ended.is_partial(CAPTURE_SAMPLE_RATE, PARTIAL_TOLERANCE) {
+    } else if !config.keep_partial && job.ended.is_partial(job.sample_rate, PARTIAL_TOLERANCE) {
         Some(DiscardReason::Partial)
     } else {
         None

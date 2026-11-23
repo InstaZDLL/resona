@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use resona_core::format::{BitDepth, OutputFormat};
+use resona_core::provider::Provider;
 use resona_core::recorder::library::ExistingTracks;
 use resona_core::recorder::naming::{Folders, Prefix};
 use resona_core::settings::{Language, Quality};
@@ -34,6 +35,7 @@ pub const FORMATS: [OutputFormat; 11] = [
     OutputFormat::Mp3 { kbps: 160 },
     OutputFormat::Mp3 { kbps: 128 },
 ];
+pub const PROVIDERS: [Provider; 2] = [Provider::Spotify, Provider::AppleMusic];
 pub const QUALITIES: [Quality; 3] = [Quality::Free, Quality::Premium, Quality::Lossless];
 pub const FOLDERS: [Folders; 3] = [Folders::None, Folders::Artist, Folders::ArtistAlbum];
 pub const PREFIXES: [Prefix; 3] = [Prefix::None, Prefix::TrackNumber, Prefix::OrderNumber];

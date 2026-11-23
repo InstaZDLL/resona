@@ -321,7 +321,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("resona-tags-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav, flac) = (dir.join("t.wav"), dir.join("t.flac"));
-        let mut writer = CaptureWav::create(&wav).unwrap();
+        let mut writer = CaptureWav::create(&wav, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&[0.25; 8_820]).unwrap();
         writer.finalize().unwrap();
         encode_wav_to_flac(&wav, &flac, crate::encode::Quantizer::new(16, 16)).unwrap();
@@ -362,7 +362,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("resona-id3-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav, mp3) = (dir.join("t.wav"), dir.join("t.mp3"));
-        let mut writer = CaptureWav::create(&wav).unwrap();
+        let mut writer = CaptureWav::create(&wav, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&[0.25; 88_200]).unwrap();
         writer.finalize().unwrap();
         encode_wav_to_mp3(&wav, &mp3, 192).unwrap();

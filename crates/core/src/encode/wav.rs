@@ -5,15 +5,17 @@ use std::path::Path;
 use hound::{SampleFormat, WavSpec, WavWriter};
 
 use crate::Result;
-use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+use crate::format::CAPTURE_CHANNELS;
 
 /// Spec of the intermediate file: the capture format, untouched.
-pub const CAPTURE_SPEC: WavSpec = WavSpec {
-    channels: CAPTURE_CHANNELS,
-    sample_rate: CAPTURE_SAMPLE_RATE,
-    bits_per_sample: 32,
-    sample_format: SampleFormat::Float,
-};
+pub fn capture_spec(sample_rate: u32) -> WavSpec {
+    WavSpec {
+        channels: CAPTURE_CHANNELS,
+        sample_rate,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    }
+}
 
 /// Intermediate 32-bit float WAV a track is captured into.
 pub struct CaptureWav {
@@ -21,9 +23,10 @@ pub struct CaptureWav {
 }
 
 impl CaptureWav {
-    pub fn create(path: &Path) -> Result<Self> {
+    /// At the rate the audio was captured at, never resampled.
+    pub fn create(path: &Path, sample_rate: u32) -> Result<Self> {
         Ok(Self {
-            writer: WavWriter::create(path, CAPTURE_SPEC)?,
+            writer: WavWriter::create(path, capture_spec(sample_rate))?,
         })
     }
 
@@ -67,7 +70,7 @@ mod tests {
         let (capture, out) = (dir.join("track.wav"), dir.join("track.out.wav"));
         let values = [1234, -32_768, 32_767, 0];
         let samples: Vec<f32> = values.iter().map(|&v| v as f32 / 32_768.0).collect();
-        let mut writer = CaptureWav::create(&capture).unwrap();
+        let mut writer = CaptureWav::create(&capture, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&samples).unwrap();
         writer.finalize().unwrap();
 

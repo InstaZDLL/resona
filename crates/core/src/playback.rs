@@ -1,5 +1,5 @@
-//! Plays the captured audio on the Windows default device, so Spotify can
-//! still be heard while it plays silently into the virtual cable. Takes
+//! Plays the captured audio on the Windows default device, so the music app
+//! can still be heard while it plays silently into the virtual cable. Takes
 //! the place of Windows' "Listen to this device", which would need setting
 //! up by hand.
 //!
@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use wasapi::{DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat};
 
-use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+use crate::format::CAPTURE_CHANNELS;
 use crate::{Error, Result};
 
 const EVENT_TIMEOUT_MS: u32 = 250;
@@ -29,10 +29,10 @@ pub struct Playback {
 
 impl Playback {
     /// Starts playing on the default device what is sent to the returned
-    /// channel (interleaved stereo `f32` at [`CAPTURE_SAMPLE_RATE`]).
+    /// channel (interleaved stereo `f32` at `sample_rate`, the capture's).
     /// Refuses `avoid`, the device the captured audio comes from: playing
     /// it back there would loop. Needs nothing from the caller's thread.
-    pub fn start(avoid: &str) -> Result<(Self, Sender<Vec<f32>>)> {
+    pub fn start(avoid: &str, sample_rate: u32) -> Result<(Self, Sender<Vec<f32>>)> {
         let (samples_tx, samples_rx) = crossbeam_channel::unbounded();
         let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
         let stop = Arc::new(AtomicBool::new(false));
@@ -41,7 +41,7 @@ impl Playback {
         let thread = thread::Builder::new()
             .name("resona-playback".into())
             .spawn(move || {
-                if let Err(e) = play(&avoid, &samples_rx, &ready_tx, &thread_stop) {
+                if let Err(e) = play(&avoid, sample_rate, &samples_rx, &ready_tx, &thread_stop) {
                     // Before the stream started, `ready` carries the error.
                     let _ = ready_tx.send(Err(e));
                 }
@@ -69,6 +69,7 @@ impl Drop for Playback {
 
 fn play(
     avoid: &str,
+    sample_rate: u32,
     samples: &Receiver<Vec<f32>>,
     ready: &Sender<Result<()>>,
     stop: &AtomicBool,
@@ -82,7 +83,7 @@ fn play(
         32,
         32,
         &SampleType::Float,
-        CAPTURE_SAMPLE_RATE as usize,
+        sample_rate as usize,
         usize::from(CAPTURE_CHANNELS),
         None,
     );
@@ -100,7 +101,7 @@ fn play(
     let _ = ready.send(Ok(()));
 
     let channels = usize::from(CAPTURE_CHANNELS);
-    let max_queued = MAX_QUEUED_SECS * CAPTURE_SAMPLE_RATE as usize * channels;
+    let max_queued = MAX_QUEUED_SECS * sample_rate as usize * channels;
     let mut queue: VecDeque<f32> = VecDeque::new();
     while !stop.load(Ordering::Relaxed) {
         loop {
