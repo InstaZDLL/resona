@@ -6,7 +6,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use resona_core::analysis::Fidelity;
@@ -449,17 +449,29 @@ fn show_provider(window: &AppWindow, provider: Provider) {
 }
 
 /// What the record button stops.
+/// Each with the thread forwarding its events to the window.
 enum Running {
-    Free(Recorder),
-    Playlist(PlaylistSession),
+    Free(Recorder, JoinHandle<()>),
+    Playlist(PlaylistSession, JoinHandle<()>),
 }
 
 impl Running {
+    /// Returns once every event of the session has been handed to the
+    /// window: whatever the window does next (a new recording, another
+    /// app) comes after the last results of this one.
     fn stop(self) {
-        match self {
-            Self::Free(recorder) => recorder.stop(),
-            Self::Playlist(session) => session.stop(),
-        }
+        let forwarder = match self {
+            Self::Free(recorder, forwarder) => {
+                recorder.stop();
+                forwarder
+            }
+            Self::Playlist(session, forwarder) => {
+                session.stop();
+                forwarder
+            }
+        };
+        // Ends with the session's event channel, closed by the stop.
+        let _ = forwarder.join();
     }
 }
 
@@ -517,15 +529,15 @@ impl Session {
                             }
                         }
                     });
-                    forward(named_rx, window.as_weak(), on_recorder_event);
-                    Running::Free(recorder)
+                    let forwarder = forward(named_rx, window.as_weak(), on_recorder_event);
+                    Running::Free(recorder, forwarder)
                 })
             }
             Some(source) => PlaylistSession::start(config, source).map(|(session, events)| {
                 LAST_ENTRY.set(None);
                 window.set_playlist_running(true);
-                forward(events, window.as_weak(), on_playlist_event);
-                Running::Playlist(session)
+                let forwarder = forward(events, window.as_weak(), on_playlist_event);
+                Running::Playlist(session, forwarder)
             }),
         };
         match started {
@@ -750,12 +762,13 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
 }
 
 /// Hands every event of `events` to `handle` on the UI thread, until the
-/// sender is dropped.
+/// sender is dropped. The returned thread ends then, its events queued on
+/// the UI thread in order.
 fn forward<E: Send + 'static>(
     events: crossbeam_channel::Receiver<E>,
     window: Weak<AppWindow>,
     handle: fn(&AppWindow, E),
-) {
+) -> JoinHandle<()> {
     thread::spawn(move || {
         for event in events {
             if window
@@ -765,7 +778,7 @@ fn forward<E: Send + 'static>(
                 break;
             }
         }
-    });
+    })
 }
 
 /// `generation` is the watch the event comes from: a monitor stopped after
