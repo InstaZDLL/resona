@@ -504,10 +504,23 @@ impl Session {
         window.set_playlist_name(SharedString::new());
         let config = self.settings.borrow().recorder_config();
         let started = match source {
-            None => Recorder::start(config).map(|(recorder, events)| {
-                forward(events, window.as_weak(), on_recorder_event);
-                Running::Free(recorder)
-            }),
+            None => {
+                // Every event of this recording names the app it records,
+                // whatever is selected by the time it reaches the window.
+                let player = config.provider.name();
+                Recorder::start(config).map(|(recorder, events)| {
+                    let (named_tx, named_rx) = crossbeam_channel::unbounded();
+                    thread::spawn(move || {
+                        for event in events {
+                            if named_tx.send((player, event)).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    forward(named_rx, window.as_weak(), on_recorder_event);
+                    Running::Free(recorder)
+                })
+            }
             Some(source) => PlaylistSession::start(config, source).map(|(session, events)| {
                 LAST_ENTRY.set(None);
                 window.set_playlist_running(true);
@@ -656,7 +669,8 @@ fn on_playlist_event(window: &AppWindow, event: PlaylistEvent) {
                     | RecorderEvent::Discarded { .. },
                     _,
                 ) => {}
-                (event, _) => on_recorder_event(window, event),
+                // Playlists are Spotify's.
+                (event, _) => on_recorder_event(window, ("Spotify", event)),
             }
         }
         PlaylistEvent::Error(problem) => {
@@ -811,7 +825,8 @@ fn show_now_playing(window: &AppWindow, title: Option<&TrackTitle>, album: Optio
     window.set_now_album(album.unwrap_or_default().into());
 }
 
-fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
+/// `player` is the app the recording is of, which its rows name.
+fn on_recorder_event(window: &AppWindow, (player, event): (&'static str, RecorderEvent)) {
     let tracks = window.get_tracks();
     let Some(tracks) = tracks.as_any().downcast_ref::<VecModel<TrackRow>>() else {
         return;
@@ -849,10 +864,10 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             notices.set_vec(kept);
         }
         RecorderEvent::Recording(title) => {
-            tracks.push(row(window, &title, TrackState::Recording));
+            tracks.push(row(player, &title, TrackState::Recording));
         }
         RecorderEvent::AlreadyRecorded { title, .. } => {
-            tracks.push(row(window, &title, TrackState::AlreadyRecorded));
+            tracks.push(row(player, &title, TrackState::AlreadyRecorded));
         }
         RecorderEvent::Saved {
             title,
@@ -862,7 +877,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             tags,
             ..
         } => {
-            let mut saved = row(window, &title, TrackState::Saved);
+            let mut saved = row(player, &title, TrackState::Saved);
             describe(&mut saved, fidelity, duration);
             saved.tagged = tags.is_complete();
             saved.format = extension(&path).into();
@@ -878,7 +893,7 @@ fn on_recorder_event(window: &AppWindow, event: RecorderEvent) {
             fidelity,
             duration,
         } => {
-            let mut discarded = row(window, &title, TrackState::Discarded);
+            let mut discarded = row(player, &title, TrackState::Discarded);
             describe(&mut discarded, fidelity, duration);
             discarded.reason = reason_of(reason);
             replace_recording(tracks, &title, discarded);
@@ -935,13 +950,12 @@ fn show_cable_as_default(window: &AppWindow, as_default: &CableAsDefault) {
     });
 }
 
-/// A row for `title`, recorded from the app selected in `window` (the
-/// selection cannot change while recording).
-fn row(window: &AppWindow, title: &TrackTitle, state: TrackState) -> TrackRow {
+/// A row for `title`, recorded from the app named `player`.
+fn row(player: &str, title: &TrackTitle, state: TrackState) -> TrackRow {
     TrackRow {
         title: title.to_string().into(),
         state,
-        player: window.get_player(),
+        player: player.into(),
         ..TrackRow::default()
     }
 }
