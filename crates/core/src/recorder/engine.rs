@@ -21,9 +21,8 @@ use crate::analysis::{BitAnalysis, Fidelity};
 use crate::audio_setup::{self, CableAsDefault, OutputDevice};
 use crate::capture::{CaptureConfig, Packet, ProcessCapture};
 use crate::device_config;
-use crate::encode::{Quantizer, flac, mp3, wav, wav::CaptureWav};
-use crate::format::CAPTURE_SAMPLE_RATE;
-use crate::format::OutputFormat;
+use crate::encode::{Channels, Quantizer, flac, mp3, wav, wav::CaptureWav};
+use crate::format::{CAPTURE_SAMPLE_RATE, ChannelLayout, OutputFormat};
 use crate::metadata::deezer::DeezerClient;
 use crate::metadata::lyrics::{Lyrics, LyricsClient, LyricsQuery};
 use crate::metadata::name_match::title_similarity;
@@ -80,6 +79,13 @@ pub struct RecorderConfig {
     /// With [`Self::virtual_cable`]: play what is recorded on the default
     /// device, to hear the app. Off, it is silent while recording.
     pub listen: bool,
+    /// With [`Self::virtual_cable`], for an app that renders surround
+    /// ([`Provider::renders_surround`]: Apple Music's Dolby Atmos): capture
+    /// every channel of a cable set up as surround (7.1 Surround in its
+    /// speaker setup). A track that carries sound beyond the front pair is
+    /// saved with all its channels (FLAC, WAV; MP3 gets a stereo downmix),
+    /// any other one in stereo as before. Off, only the front pair is kept.
+    pub surround: bool,
     /// Write lyrics (LRCLIB, synced when available) as a `.lrc` file next
     /// to each track.
     pub lyrics: bool,
@@ -96,6 +102,9 @@ pub enum RecorderEvent {
     /// [`RecorderConfig::virtual_cable`] is on but no cable is installed:
     /// Spotify stays on its current device.
     CableMissing,
+    /// [`RecorderConfig::surround`] is on but the cable (named) is not set
+    /// up with a surround speaker layout: recorded in stereo.
+    CableNotSurround(String),
     /// The Windows default output device is the virtual cable: nothing is
     /// heard (VB-Cable's installer does that).
     CableIsDefault(CableAsDefault),
@@ -193,6 +202,8 @@ struct Capture {
     packets: Receiver<Packet>,
     device: OutputDevice,
     sample_rate: u32,
+    /// Of the packets: the device's own, or stereo.
+    layout: ChannelLayout,
 }
 
 fn start_capture(
@@ -215,16 +226,26 @@ fn start_capture(
     // Never resampled on our side: at the app's own rate, else at the
     // device's, which is what Apple Music's mixed stream comes at.
     let sample_rate = provider.fixed_rate().unwrap_or(device.sample_rate);
+    let surround = config.surround && provider.renders_surround() && cable.is_some();
+    let keep_all_channels = surround && device.layout().is_standard_surround();
+    if surround && !keep_all_channels {
+        let _ = events.send(RecorderEvent::CableNotSurround(device.name.clone()));
+    }
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid,
-        source_channels: device.channels,
-        channel_mask: device.channel_mask,
+        layout: device.layout(),
+        keep_all_channels,
         sample_rate,
     })?;
     Ok(Capture {
         pid,
         capture,
         packets,
+        layout: if keep_all_channels {
+            device.layout()
+        } else {
+            ChannelLayout::STEREO
+        },
         device,
         sample_rate,
     })
@@ -303,15 +324,18 @@ impl Drop for CableRoute {
     }
 }
 
-/// Plays the capture (at `sample_rate`) on the default device, the app
-/// itself being silent in the cable. `None`, with an event saying why, when
-/// that fails.
+/// A capture's rate and channels.
+type AudioFormat = (u32, ChannelLayout);
+
+/// Plays the capture (at `sample_rate`, in `layout`) on the default device,
+/// the app itself being silent in the cable. `None`, with an event saying
+/// why, when that fails.
 fn listen(
     cable_id: &str,
-    sample_rate: u32,
+    (sample_rate, layout): AudioFormat,
     events: &Sender<RecorderEvent>,
 ) -> Option<(Playback, Sender<Vec<f32>>)> {
-    match Playback::start(cable_id, sample_rate) {
+    match Playback::start(cable_id, sample_rate, layout) {
         Ok(playback) => Some(playback),
         // The cable is the default device: [`RecorderEvent::CableIsDefault`]
         // has said so already.
@@ -357,10 +381,12 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
 
     // Until a capture says otherwise (Apple Music: the device's rate).
     let sample_rate = config.provider.fixed_rate().unwrap_or(CAPTURE_SAMPLE_RATE);
+    let layout = ChannelLayout::STEREO;
     let mut session = Session {
-        splitter: Splitter::new(sample_rate),
+        splitter: Splitter::new(sample_rate, layout.channels),
         clock: FrameClock::new(sample_rate),
         sample_rate,
+        layout,
         content: None,
         playing_now: None,
         writer: None,
@@ -383,7 +409,8 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
     let mut last_alive_check = Instant::now();
     // Dropped when the session ends, error or not: Spotify leaves the cable.
     let mut cable: Option<CableRoute> = None;
-    let mut playback: Option<(Playback, Sender<Vec<f32>>, u32)> = None;
+    // With the rate and layout it plays at.
+    let mut playback: Option<(Playback, Sender<Vec<f32>>, AudioFormat)> = None;
 
     loop {
         // A capture of a process that quit hears nothing: Apple Music's
@@ -399,21 +426,20 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
         if capture.is_none() && last_attempt.is_none_or(|t| t.elapsed() >= CAPTURE_RETRY) {
             last_attempt = Some(Instant::now());
             if let Ok(started) = start_capture(config, &mut cable, events) {
-                session.set_sample_rate(started.sample_rate)?;
-                // Played back at the capture's rate: a new one (Apple Music,
-                // the cable's rate changed) restarts the playback.
-                if playback
-                    .as_ref()
-                    .is_some_and(|(_, _, rate)| *rate != started.sample_rate)
-                {
+                session.set_format(started.sample_rate, started.layout)?;
+                // Played back in the capture's format: a new one (Apple
+                // Music, the cable's rate or speakers changed) restarts the
+                // playback.
+                let format = (started.sample_rate, started.layout);
+                if playback.as_ref().is_some_and(|(_, _, f)| *f != format) {
                     playback = None;
                 }
                 if config.listen
                     && playback.is_none()
                     && let Some(route) = &cable
                 {
-                    playback = listen(&route.cable_id, started.sample_rate, events)
-                        .map(|(p, to_headset)| (p, to_headset, started.sample_rate));
+                    playback = listen(&route.cable_id, format, events)
+                        .map(|(p, to_headset)| (p, to_headset, format));
                 }
                 let _ = events.send(RecorderEvent::CaptureStarted {
                     pid: started.pid,
@@ -475,6 +501,8 @@ struct Job {
     wav: PathBuf,
     /// Of the capture, which the WAV is at.
     sample_rate: u32,
+    /// The WAV's channels.
+    layout: ChannelLayout,
     analysis: BitAnalysis,
     /// The catalogue entry played, for exact tags.
     uri: Option<String>,
@@ -538,6 +566,8 @@ struct Session {
     clock: FrameClock,
     /// Of the capture the splitter and the clock count frames at.
     sample_rate: u32,
+    /// Of the capture's packets, which the splitter holds and writes.
+    layout: ChannelLayout,
     /// The last content and play state reported, replayed into a new
     /// splitter when the rate changes.
     content: Option<Content>,
@@ -559,8 +589,9 @@ struct Session {
 
 impl Session {
     fn audio(&mut self, packet: &Packet) -> Result<()> {
+        debug_assert_eq!(packet.channels, self.layout.channels);
         let start = self.splitter.end_frame();
-        let end = start + (packet.samples.len() / 2) as u64;
+        let end = start + (packet.samples.len() / usize::from(packet.channels)) as u64;
         self.clock.record(packet.received_at, start, end);
         let actions = self.splitter.push_audio(&packet.samples);
         self.apply(actions)
@@ -635,9 +666,9 @@ impl Session {
                     self.writer = Some(Writer {
                         uri: self.playing.as_ref().and_then(|w| w.uri_for(&track.title)),
                         title: track.title,
-                        wav: CaptureWav::create(&path, self.sample_rate)?,
+                        wav: CaptureWav::with_layout(&path, self.sample_rate, self.layout)?,
                         path,
-                        analysis: BitAnalysis::default(),
+                        analysis: BitAnalysis::new(self.layout.channels),
                     });
                 }
                 Action::Write(samples) => {
@@ -657,6 +688,7 @@ impl Session {
                             ended,
                             wav: writer.path,
                             sample_rate: self.sample_rate,
+                            layout: self.layout,
                             analysis: writer.analysis,
                             uri: writer.uri,
                         });
@@ -669,17 +701,19 @@ impl Session {
 }
 
 impl Session {
-    /// A capture at another rate than the frames counted so far (Apple
-    /// Music, its device switched between 44.1 and 48 kHz): the track in
-    /// progress ends there, and a new splitter goes on with what plays.
-    fn set_sample_rate(&mut self, sample_rate: u32) -> Result<()> {
-        if sample_rate == self.sample_rate {
+    /// A capture at another rate or in other channels than the frames
+    /// counted so far (Apple Music, its device switched between 44.1 and
+    /// 48 kHz, or between stereo and 7.1): the track in progress ends
+    /// there, and a new splitter goes on with what plays.
+    fn set_format(&mut self, sample_rate: u32, layout: ChannelLayout) -> Result<()> {
+        if (sample_rate, layout) == (self.sample_rate, self.layout) {
             return Ok(());
         }
         let actions = self.splitter.finish();
         self.apply(actions)?;
         self.sample_rate = sample_rate;
-        self.splitter = Splitter::new(sample_rate);
+        self.layout = layout;
+        self.splitter = Splitter::new(sample_rate, layout.channels);
         self.clock = FrameClock::new(sample_rate);
         // In the order the monitor reports them.
         if let Some(playing) = self.playing_now {
@@ -823,16 +857,17 @@ fn encode(
         .wav
         .with_extension(format!("out.{}", format.extension()));
     let source_bits = fidelity.lossless_depth();
+    let channels = output_channels(fidelity, format, job.layout);
     match format {
         OutputFormat::Flac { depth } => {
             let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
-            flac::encode_wav_to_flac(&job.wav, &staged, quantizer)?;
+            flac::encode_wav_to_flac(&job.wav, &staged, quantizer, channels)?;
         }
         OutputFormat::Wav { depth } => {
             let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
-            wav::export_wav(&job.wav, &staged, quantizer)?;
+            wav::export_wav(&job.wav, &staged, quantizer, channels)?;
         }
-        OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps)?,
+        OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps, channels)?,
     }
     let (tags, mut outcome) = metadata::tags_for(
         catalogues.deezer.as_ref(),
@@ -910,6 +945,17 @@ fn encode(
         tags: outcome,
         lyrics,
     })
+}
+
+/// The channels a track is written with: all of a surround one (a stereo
+/// downmix in MP3), the front pair of any other, whatever the capture
+/// held (a stereo track on a 7.1 cable leaves the others silent).
+fn output_channels(fidelity: Fidelity, format: OutputFormat, layout: ChannelLayout) -> Channels {
+    match (fidelity, format) {
+        (Fidelity::Surround { .. }, OutputFormat::Mp3 { .. }) => Channels::Downmix(layout),
+        (Fidelity::Surround { .. }, _) => Channels::All(layout),
+        _ => Channels::FrontPair,
+    }
 }
 
 /// What became of a track's lyrics.

@@ -423,6 +423,7 @@ fn show_provider(window: &AppWindow, provider: Provider) {
     window.set_provider_index(index_of(&mapping::PROVIDERS, &provider));
     window.set_player(provider.name().into());
     window.set_spotify_tools(provider.has_spotify_tools());
+    window.set_surround_capable(provider.renders_surround());
     window.set_spotify_state(SpotifyState::NotRunning);
     window.set_has_cover(false);
     show_now_playing(window, None, None);
@@ -751,6 +752,7 @@ fn show_settings(window: &AppWindow, settings: &Settings) {
     window.set_check_updates(settings.check_updates);
     window.set_lyrics(settings.lyrics);
     window.set_listen(settings.listen);
+    window.set_surround(settings.surround);
     window.set_language_index(index_of(&mapping::LANGUAGES, &settings.language));
 }
 
@@ -768,6 +770,7 @@ fn read_settings(window: &AppWindow, settings: &mut Settings) {
     settings.check_updates = window.get_check_updates();
     settings.lyrics = window.get_lyrics();
     settings.listen = window.get_listen();
+    settings.surround = window.get_surround();
 }
 
 /// A session is recording, or still finishing after a stop: no other may
@@ -956,6 +959,16 @@ fn on_recorder_event(window: &AppWindow, (player, event): (&'static str, Recorde
             kind: Warning::CableMissing,
             ..Notice::default()
         }),
+        // Once: each capture start would repeat it.
+        RecorderEvent::CableNotSurround(cable) => {
+            if !notices.iter().any(|n| n.kind == Warning::CableNotSurround) {
+                notices.push(Notice {
+                    kind: Warning::CableNotSurround,
+                    device: cable.into(),
+                    ..Notice::default()
+                });
+            }
+        }
         RecorderEvent::CaptureLost | RecorderEvent::AdMuted(_) | RecorderEvent::Spotify(_) => {}
     }
 }
@@ -1001,6 +1014,10 @@ fn describe(row: &mut TrackRow, fidelity: Fidelity, duration: Duration) {
         Fidelity::PeakLimited => (Quality::PeakLimited, 24, 0),
         Fidelity::Processed => (Quality::Processed, 0, 0),
         Fidelity::Silent => (Quality::Silent, 0, 0),
+        Fidelity::Surround { channels } => {
+            row.channels = i32::from(channels);
+            (Quality::Surround, 24, 0)
+        }
     };
 }
 

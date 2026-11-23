@@ -100,11 +100,13 @@ impl Cut {
     }
 }
 
-/// `samples` is interleaved stereo starting at frame `first_frame`. Only
-/// audio inside both `samples` and the search is looked at.
-pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
+/// `samples` is interleaved, `channels` per frame, starting at frame
+/// `first_frame`. Only audio inside both `samples` and the search is
+/// looked at. Every channel counts: a frame is silent when all are.
+pub fn place_cut(samples: &[f32], channels: u16, first_frame: u64, search: Search) -> Cut {
     let audio = Audio {
         samples,
+        channels: usize::from(channels),
         first_frame,
     };
     let target = search.target;
@@ -166,22 +168,23 @@ pub fn place_cut(samples: &[f32], first_frame: u64, search: Search) -> Cut {
 
 struct Audio<'a> {
     samples: &'a [f32],
+    channels: usize,
     first_frame: u64,
 }
 
 impl Audio<'_> {
     fn end(&self) -> u64 {
-        self.first_frame + (self.samples.len() / 2) as u64
+        self.first_frame + (self.samples.len() / self.channels) as u64
     }
 
     /// Samples of `frames` frames from frame `at`.
     fn frames(&self, at: u64, frames: usize) -> &[f32] {
-        let offset = ((at - self.first_frame) * 2) as usize;
-        &self.samples[offset..offset + frames * 2]
+        let offset = (at - self.first_frame) as usize * self.channels;
+        &self.samples[offset..offset + frames * self.channels]
     }
 
     fn is_silent(&self, at: u64) -> bool {
-        self.frames(at, 1) == [0.0, 0.0]
+        self.frames(at, 1).iter().all(|&s| s == 0.0)
     }
 
     /// The run of digital silence (start, end) at least `min` frames long
@@ -320,13 +323,13 @@ mod tests {
     }
 
     fn cut(samples: &[f32], first_frame: u64, search: Search) -> u64 {
-        place_cut(samples, first_frame, search).frame
+        place_cut(samples, 2, first_frame, search).frame
     }
 
     #[test]
     fn moves_onto_the_gap() {
         let samples = signal(44_100, 20_000..21_000);
-        let placed = place_cut(&samples, 0, around(22_000, 4_410, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(22_000, 4_410, Kind::Interrupted));
         // The gap's end, nearest the estimate.
         assert_eq!(placed, Cut::at(21_000, CutBy::Silence));
     }
@@ -334,21 +337,21 @@ mod tests {
     #[test]
     fn a_gap_is_split_at_the_target() {
         let samples = signal(44_100, 20_000..21_000);
-        let placed = place_cut(&samples, 0, around(20_300, 4_410, Kind::Ending));
+        let placed = place_cut(&samples, 2, 0, around(20_300, 4_410, Kind::Ending));
         assert_eq!(placed, Cut::at(20_300, CutBy::Silence));
     }
 
     #[test]
     fn keeps_the_estimate_without_a_gap() {
         let samples = signal(44_100, 0..0);
-        let placed = place_cut(&samples, 0, around(22_000, 4_410, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(22_000, 4_410, Kind::Interrupted));
         assert_eq!(placed, Cut::at(22_000, CutBy::Estimate));
     }
 
     #[test]
     fn gapless_cuts_at_the_declared_length() {
         let samples = signal(44_100, 0..0);
-        let placed = place_cut(&samples, 0, around(22_000, 8_820, Kind::Ending));
+        let placed = place_cut(&samples, 2, 0, around(22_000, 8_820, Kind::Ending));
         assert_eq!(placed, Cut::at(22_000, CutBy::Length));
     }
 
@@ -404,10 +407,10 @@ mod tests {
             19_400..19_841 => 0.0002,
             _ => 0.002,
         });
-        let ending = place_cut(&samples, 0, around(22_050, 8_820, Kind::Ending));
+        let ending = place_cut(&samples, 2, 0, around(22_050, 8_820, Kind::Ending));
         assert_eq!(ending, Cut::at(22_050, CutBy::Length));
         // Around a change, the quietest moment wins.
-        let interrupted = place_cut(&samples, 0, around(22_050, 8_820, Kind::Interrupted));
+        let interrupted = place_cut(&samples, 2, 0, around(22_050, 8_820, Kind::Interrupted));
         assert_eq!(interrupted.by, CutBy::Silence);
         assert!(
             (19_400..19_841).contains(&interrupted.frame),
@@ -426,7 +429,7 @@ mod tests {
             26_000..26_441 => 0.0002,
             _ => 0.005,
         });
-        let placed = place_cut(&samples, 0, around(19_000, 13_230, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(19_000, 13_230, Kind::Interrupted));
         assert_eq!(placed, Cut::at(20_000, CutBy::Silence));
     }
 
@@ -436,7 +439,7 @@ mod tests {
         // from 3 ms before it: no 10 ms block fits, and the peak collapses
         // 1 ms after the end.
         let samples = shaped(370, |f| if f >= 200 { 0.001 } else { 1.0 });
-        let ending = place_cut(&samples, 21_900, around(22_050, 4_410, Kind::Ending));
+        let ending = place_cut(&samples, 2, 21_900, around(22_050, 4_410, Kind::Ending));
         assert_eq!(ending, Cut::at(22_050, CutBy::Length));
     }
 
@@ -448,7 +451,7 @@ mod tests {
             let distance = (f as f32 - 22_050.0).abs();
             (distance / 1_323.0).clamp(0.056, 1.0)
         });
-        let placed = place_cut(&samples, 0, around(22_500, 6_615, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(22_500, 6_615, Kind::Interrupted));
         assert_eq!(placed.by, CutBy::Dip);
         assert!(placed.frame.abs_diff(22_050) < 100, "{placed:?}");
     }
@@ -461,11 +464,11 @@ mod tests {
             20_000..20_220 => 0.002,
             _ => 1.0,
         });
-        let placed = place_cut(&samples, 0, around(23_000, 13_230, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(23_000, 13_230, Kind::Interrupted));
         assert_eq!(placed.by, CutBy::Edge);
         assert!((20_000..20_220).contains(&placed.frame), "{placed:?}");
         // At a track's end, the same moment is not trusted as an edge.
-        let ending = place_cut(&samples, 0, around(23_000, 13_230, Kind::Ending));
+        let ending = place_cut(&samples, 2, 0, around(23_000, 13_230, Kind::Ending));
         assert_eq!(ending, Cut::at(23_000, CutBy::Length));
     }
 
@@ -474,7 +477,7 @@ mod tests {
         // Between two tracks without silence of their own: the run is the
         // gap, whatever the estimate.
         let samples = signal(88_200, 30_000..30_000 + 22_050);
-        let placed = place_cut(&samples, 0, around(30_400, 4_410, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(30_400, 4_410, Kind::Interrupted));
         assert_eq!(
             placed,
             Cut {
@@ -490,10 +493,10 @@ mod tests {
         // 300 ms of the tracks' own silence around the gap: it goes where
         // the declared length ends the first track.
         let samples = signal(88_200, 30_000..30_000 + 22_050 + 13_230);
-        let placed = place_cut(&samples, 0, around(35_000, 8_820, Kind::Ending));
+        let placed = place_cut(&samples, 2, 0, around(35_000, 8_820, Kind::Ending));
         assert_eq!((placed.frame, placed.resume), (35_000, 57_050));
         // A target past the run's room leaves the gap at its end.
-        let placed = place_cut(&samples, 0, around(48_000, 8_820, Kind::Ending));
+        let placed = place_cut(&samples, 2, 0, around(48_000, 8_820, Kind::Ending));
         assert_eq!((placed.frame, placed.resume), (43_230, 65_280));
     }
 
@@ -505,7 +508,7 @@ mod tests {
             ..around(35_000, 8_820, Kind::Ending)
         };
         assert_eq!(
-            place_cut(&samples, 0, search),
+            place_cut(&samples, 2, 0, search),
             Cut::at(35_000, CutBy::Silence)
         );
     }
@@ -513,7 +516,7 @@ mod tests {
     #[test]
     fn a_short_gap_is_the_tracks_own() {
         let samples = signal(88_200, 30_000..30_000 + 22_000);
-        let placed = place_cut(&samples, 0, around(30_400, 4_410, Kind::Interrupted));
+        let placed = place_cut(&samples, 2, 0, around(30_400, 4_410, Kind::Interrupted));
         assert_eq!(placed.by, CutBy::Silence);
         assert_eq!(placed.frame, placed.resume);
     }
@@ -528,7 +531,32 @@ mod tests {
     #[test]
     fn a_search_outside_the_audio_keeps_the_target() {
         let samples = signal(4_410, 0..0);
-        let placed = place_cut(&samples, 0, around(20_000, 1_000, Kind::Ending));
+        let placed = place_cut(&samples, 2, 0, around(20_000, 1_000, Kind::Ending));
         assert_eq!(placed, Cut::at(20_000, CutBy::Length));
+    }
+
+    #[test]
+    fn surround_frames_are_silent_only_when_every_channel_is() {
+        // 7.1: the front pair is silent over 20 000..21 000, the surrounds
+        // too over 20 500..21 000 only. The gap is where all are.
+        let stereo = signal(44_100, 20_000..21_000);
+        let samples: Vec<f32> = stereo
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .enumerate()
+            .flat_map(|(f, pair)| {
+                let surround = if (20_500..21_000).contains(&f) {
+                    0.0
+                } else {
+                    noise(f) / 2.0
+                };
+                [
+                    pair[0], pair[1], 0.0, 0.0, surround, surround, surround, surround,
+                ]
+            })
+            .collect();
+        let placed = place_cut(&samples, 8, 0, around(20_100, 4_410, Kind::Interrupted));
+        assert_eq!(placed, Cut::at(20_500, CutBy::Silence));
     }
 }

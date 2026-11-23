@@ -6,6 +6,7 @@ use std::path::Path;
 use hound::{SampleFormat, WavReader};
 use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, InterleavedPcm, Quality};
 
+use super::{Channels, Remix};
 use crate::{Error, Result};
 
 /// Frames per `encode` call; any multiple of an MP3 frame (1152) works.
@@ -26,17 +27,18 @@ fn lame(what: &'static str) -> impl Fn(mp3lame_encoder::BuildError) -> Error {
     move |e| Error::Mp3(format!("{what}: {e}"))
 }
 
-/// Encodes an intermediate float WAV to a CBR MP3 at `kbps`.
+/// Encodes an intermediate float WAV to a CBR MP3 at `kbps`. MP3 holds
+/// stereo: `channels` is the front pair or a downmix.
 ///
 /// LAME's Info header is kept and written over the placeholder frame it
 /// reserves at the start: it records the encoder delay and padding, which
 /// players need for gapless playback across the split tracks.
-pub fn encode_wav_to_mp3(src: &Path, dst: &Path, kbps: u32) -> Result<()> {
+pub fn encode_wav_to_mp3(src: &Path, dst: &Path, kbps: u32, channels: Channels) -> Result<()> {
     let mut reader = WavReader::open(src)?;
     let spec = reader.spec();
-    if spec.sample_format != SampleFormat::Float || spec.channels != 2 {
+    if spec.sample_format != SampleFormat::Float || channels.count() != 2 {
         return Err(Error::UnsupportedWav(
-            "expected stereo 32-bit float samples",
+            "expected 32-bit float samples, written as stereo",
         ));
     }
     let mut builder = Builder::new().ok_or_else(|| Error::Mp3("LAME unavailable".into()))?;
@@ -56,7 +58,7 @@ pub fn encode_wav_to_mp3(src: &Path, dst: &Path, kbps: u32) -> Result<()> {
 
     let mut mp3 = Vec::new();
     let mut chunk = Vec::with_capacity(CHUNK_FRAMES * 2);
-    let mut samples = reader.samples::<f32>();
+    let mut samples = Remix::new(reader.samples::<f32>(), spec.channels, channels)?;
     loop {
         chunk.clear();
         for sample in samples.by_ref().take(CHUNK_FRAMES * 2) {
@@ -104,7 +106,7 @@ mod tests {
         writer.write(&samples).unwrap();
         writer.finalize().unwrap();
 
-        encode_wav_to_mp3(&wav, &mp3, 320).unwrap();
+        encode_wav_to_mp3(&wav, &mp3, 320, Channels::FrontPair).unwrap();
         let bytes = std::fs::read(&mp3).unwrap();
         let file = lofty::read_from_path(&mp3).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();

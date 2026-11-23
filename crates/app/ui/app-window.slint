@@ -3,9 +3,9 @@ import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox } f
 export enum SpotifyState { not-running, idle, playing, paused, ad }
 export enum TrackState { waiting, recording, saved, discarded, already-recorded, failed }
 /// Quality of a saved or discarded track, from the fidelity analysis.
-export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent }
+export enum Quality { none, bit-perfect, near-transparent, peak-limited, processed, silent, surround }
 export enum Reason { none, partial, too-short, already-recorded }
-export enum Warning { update, enhancements, sample-rate, processed, spotify-volume, spotify-fades, spotify-normalize, spotify-automix, spotify-not-lossless, cable-missing, cable-default, error }
+export enum Warning { update, enhancements, sample-rate, processed, spotify-volume, spotify-fades, spotify-normalize, spotify-automix, spotify-not-lossless, cable-missing, cable-default, cable-not-surround, error }
 
 export struct TrackRow {
     title: string,
@@ -14,6 +14,8 @@ export struct TrackRow {
     quality: Quality,
     depth: int,
     touched: int,
+    /// For [`Quality.surround`]: how many.
+    channels: int,
     reason: Reason,
     tagged: bool,
     format: string,
@@ -54,6 +56,7 @@ component QualityBadge inherits Rectangle {
         : root.track.quality == Quality.near-transparent ? @tr("slightly changed by {}", root.track.player)
         : root.track.quality == Quality.peak-limited ? @tr("peaks limited by {}", root.track.player)
         : root.track.quality == Quality.processed ? @tr("altered")
+        : root.track.quality == Quality.surround ? @tr("Dolby Atmos {} ch", root.track.channels)
         : root.track.format;
     property <color> tint: root.track.state == TrackState.recording ? #e5484d
         : root.track.state != TrackState.saved ? #8e8e93
@@ -215,6 +218,8 @@ export component AppWindow inherits Window {
     in property <string> player: "Spotify";
     /// Spotify's own tools are there: playlist mode, its settings.
     in property <bool> spotify-tools: true;
+    /// The app renders Dolby Atmos in surround on a surround cable.
+    in property <bool> surround-capable;
     in property <SpotifyState> spotify-state: SpotifyState.not-running;
     in property <string> now-title;
     in property <string> now-artist;
@@ -253,6 +258,7 @@ export component AppWindow inherits Window {
     in-out property <bool> mute-ads: true;
     in-out property <bool> virtual-cable;
     in-out property <bool> listen;
+    in-out property <bool> surround;
     in-out property <bool> check-updates: true;
     in-out property <bool> lyrics: true;
     in-out property <int> language-index;
@@ -416,6 +422,7 @@ export component AppWindow inherits Window {
                         : notice.kind == Warning.spotify-automix ? @tr("⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off.")
                         : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings.")
                         : notice.kind == Warning.cable-default ? @tr("⚠ The virtual cable is the Windows default output device: nothing can be heard.")
+                        : notice.kind == Warning.cable-not-surround ? @tr("⚠ \"{}\" is set up as stereo: Dolby Atmos is recorded in stereo. Sound control panel → Playback → that device → Configure → 7.1 Surround.", notice.device)
                         : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of {}: {} (last: \"{}\"). Check its volume and the audio settings.", root.player, notice.device, notice.detail)
                         : notice.kind == Warning.spotify-volume ? @tr("⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless.", notice.detail)
                         : notice.kind == Warning.update ? @tr("Resona {} is available.", notice.device)
@@ -743,6 +750,13 @@ export component AppWindow inherits Window {
                                 text: @tr("Hear {} while recording", root.player);
                                 enabled: root.virtual-cable;
                                 checked <=> root.listen;
+                                toggled => { root.settings-changed(); }
+                            }
+                            if root.surround-capable: Option {
+                                text: @tr("Keep Dolby Atmos in surround");
+                                hint: @tr("With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their 8 channels (MP3: mixed down to stereo). Atmos is lossy: this is its 7.1 render, not a lossless source.", root.player);
+                                enabled: root.virtual-cable;
+                                checked <=> root.surround;
                                 toggled => { root.settings-changed(); }
                             }
                             if root.cable-name == "": Text {

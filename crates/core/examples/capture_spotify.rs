@@ -16,8 +16,8 @@ fn main() -> anyhow::Result<()> {
     use resona_core::analysis::{self, BitAnalysis};
     use resona_core::audio_setup;
     use resona_core::capture::{CaptureConfig, ProcessCapture};
-    use resona_core::encode::{Quantizer, flac, wav::CaptureWav};
-    use resona_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+    use resona_core::encode::{Channels, Quantizer, flac, wav::CaptureWav};
+    use resona_core::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE, ChannelLayout};
     use resona_core::provider::Provider;
     use resona_core::spotify::process::AppProcesses;
 
@@ -81,8 +81,8 @@ fn main() -> anyhow::Result<()> {
     };
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid: processes.root,
-        source_channels: channels,
-        channel_mask: mask,
+        layout: ChannelLayout { channels, mask },
+        keep_all_channels: false,
         sample_rate: CAPTURE_SAMPLE_RATE,
     })?;
     let mut wav = CaptureWav::create(&intermediate, CAPTURE_SAMPLE_RATE)?;
@@ -188,7 +188,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    flac::encode_wav_to_flac(&intermediate, &output, Quantizer::new(bits, bits))?;
+    flac::encode_wav_to_flac(
+        &intermediate,
+        &output,
+        Quantizer::new(bits, bits),
+        Channels::FrontPair,
+    )?;
     if std::env::var_os("RESONA_KEEP_WAV").is_some() {
         println!("kept the raw float capture: {}", intermediate.display());
     } else {

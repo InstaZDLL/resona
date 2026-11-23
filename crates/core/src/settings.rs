@@ -33,6 +33,9 @@ pub struct Settings {
     pub virtual_cable: bool,
     /// Hear Spotify while it plays into the cable.
     pub listen: bool,
+    /// Apple Music on the cable: keep Dolby Atmos' surround channels (see
+    /// `RecorderConfig::surround`).
+    pub surround: bool,
     /// Ask GitHub for a newer release at launch.
     pub check_updates: bool,
     /// Lyrics from LRCLIB (synced when available), as a `.lrc` file next
@@ -88,6 +91,7 @@ impl Default for Settings {
             mute_ads: true,
             virtual_cable: false,
             listen: false,
+            surround: false,
             check_updates: true,
             lyrics: true,
             language: Language::En,
@@ -166,6 +170,7 @@ impl Settings {
             mute_ads: self.mute_ads,
             virtual_cable: self.virtual_cable,
             listen: self.listen,
+            surround: self.surround,
             lyrics: self.lyrics,
         }
     }

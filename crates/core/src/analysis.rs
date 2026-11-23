@@ -11,8 +11,15 @@
 const SCALE_16: f32 = 32_768.0; // 2^15
 const SCALE_24: f32 = 8_388_608.0; // 2^23
 
-#[derive(Debug, Clone, Default)]
+/// Judged on the front left / right pair; on a surround capture the other
+/// channels are only measured ([`Self::surround_peak`]): whether they carry
+/// sound decides between a stereo track and a [`Fidelity::Surround`] one.
+#[derive(Debug, Clone)]
 pub struct BitAnalysis {
+    /// Per frame of the samples fed.
+    channels: u16,
+    /// Peak of the channels beyond the front pair.
+    surround_peak: f32,
     samples: u64,
     not_16_bit: u64,
     not_24_bit: u64,
@@ -58,6 +65,12 @@ const LOUD_PEAK: f32 = 0.708;
 /// How faithful a capture is to what Spotify decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fidelity {
+    /// Sound beyond the front pair: a multichannel render, Apple Music's
+    /// Dolby Atmos on a surround cable (`docs/PLAN.md`, Dolby Atmos). Kept
+    /// with every channel. Its source is lossy (Dolby Digital Plus) and
+    /// rendered by the app: a faithful capture of that render, never
+    /// bit-perfect, so it is not judged like stereo.
+    Surround { channels: u16 },
     /// Every sample is the source's integer value: a real lossless rip.
     /// `touched` counts the few samples Spotify altered anyway (short fades
     /// at a pause or a buffer hiccup, a few hundred per track at most):
@@ -87,7 +100,9 @@ impl Fidelity {
         match self {
             Self::BitPerfect { depth, .. } => depth,
             Self::Silent => 16,
-            Self::NearTransparent | Self::PeakLimited | Self::Processed => 24,
+            Self::Surround { .. } | Self::NearTransparent | Self::PeakLimited | Self::Processed => {
+                24
+            }
         }
     }
 }
@@ -105,8 +120,52 @@ const TOUCHED_RATIO: u64 = 10_000;
 /// uniform spread) for anything processed.
 const NEAR_TRANSPARENT_RESIDUAL: f64 = 0.15;
 
+impl Default for BitAnalysis {
+    /// For stereo samples.
+    fn default() -> Self {
+        Self::new(2)
+    }
+}
+
 impl BitAnalysis {
+    /// For interleaved samples of `channels` channels, front left / right
+    /// first.
+    pub fn new(channels: u16) -> Self {
+        debug_assert!(channels >= 2);
+        Self {
+            channels,
+            surround_peak: 0.0,
+            samples: 0,
+            not_16_bit: 0,
+            not_24_bit: 0,
+            clipped: 0,
+            peak: 0.0,
+            residual_24: 0.0,
+            block: Block::default(),
+            loud: Share::default(),
+            quiet: Share::default(),
+            head_off: 0,
+        }
+    }
+
     pub fn feed(&mut self, samples: &[f32]) {
+        if self.channels == 2 {
+            self.feed_stereo(samples);
+            return;
+        }
+        let channels = usize::from(self.channels);
+        let mut front = Vec::with_capacity(samples.len() / channels * 2);
+        for frame in samples.chunks_exact(channels) {
+            front.extend_from_slice(&frame[..2]);
+            for sample in &frame[2..] {
+                self.surround_peak = self.surround_peak.max(sample.abs());
+            }
+        }
+        self.feed_stereo(&front);
+    }
+
+    /// The front pair, interleaved.
+    fn feed_stereo(&mut self, samples: &[f32]) {
         for &sample in samples {
             self.samples += 1;
             let magnitude = sample.abs();
@@ -149,6 +208,18 @@ impl BitAnalysis {
         }
     }
 
+    /// Peak of the channels beyond the front pair; 0 for stereo.
+    pub const fn surround_peak(&self) -> f32 {
+        self.surround_peak
+    }
+
+    /// The channels beyond the front pair carry sound: the track is a
+    /// multichannel one, written with all of them.
+    pub fn is_surround(&self) -> bool {
+        self.surround_peak > 0.0
+    }
+
+    /// Front-pair samples analysed.
     pub const fn samples(&self) -> u64 {
         self.samples
     }
@@ -177,7 +248,7 @@ impl BitAnalysis {
     /// Digital silence (or nothing captured). Silence sits on every grid,
     /// so it proves nothing about transparency.
     pub fn is_silent(&self) -> bool {
-        self.peak == 0.0
+        self.peak == 0.0 && !self.is_surround()
     }
 
     /// The capture is an exact image of an integer PCM stream.
@@ -186,6 +257,11 @@ impl BitAnalysis {
     }
 
     pub fn fidelity(&self) -> Fidelity {
+        if self.is_surround() {
+            return Fidelity::Surround {
+                channels: self.channels,
+            };
+        }
         if self.is_silent() {
             return Fidelity::Silent;
         }
@@ -614,5 +690,34 @@ mod tests {
         assert_eq!(quantize(4_660_801.0 / SCALE_24, 24), 4_660_801);
         assert_eq!(quantize(1.0, 24), 8_388_607);
         assert_eq!(quantize(-1.5, 16), -32_768);
+    }
+
+    #[test]
+    fn a_surround_track_is_judged_by_its_other_channels() {
+        // 7.1 with a 16-bit exact front pair.
+        let frame = |front: i32, other: f32| {
+            let front = front as f32 / SCALE_16;
+            [front, -front, other, other, other, other, other, other]
+        };
+        let silent_around: Vec<f32> = (0..1000).flat_map(|i| frame(i - 500, 0.0)).collect();
+        let mut stereo = BitAnalysis::new(8);
+        stereo.feed(&silent_around);
+        // Nothing beyond the front pair: an ordinary stereo verdict.
+        assert!(!stereo.is_surround());
+        assert_eq!(
+            stereo.fidelity(),
+            Fidelity::BitPerfect {
+                depth: 16,
+                touched: 0
+            }
+        );
+        assert_eq!(stereo.samples(), 2000);
+
+        let atmos: Vec<f32> = (0..1000).flat_map(|i| frame(0, i as f32 * 1e-4)).collect();
+        let mut surround = BitAnalysis::new(8);
+        surround.feed(&atmos);
+        assert!(surround.is_surround() && !surround.is_silent());
+        assert_eq!(surround.fidelity(), Fidelity::Surround { channels: 8 });
+        assert_eq!(surround.fidelity().lossless_depth(), 24);
     }
 }

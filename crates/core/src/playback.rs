@@ -4,7 +4,8 @@
 //! up by hand.
 //!
 //! What is heard goes through the headset's own chain (resampling,
-//! enhancements): it never reaches the recording.
+//! enhancements, and Windows' downmix of a surround capture to the
+//! headset's channels): it never reaches the recording.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use std::thread::{self, JoinHandle};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use wasapi::{DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat};
 
-use crate::format::CAPTURE_CHANNELS;
+use crate::format::ChannelLayout;
 use crate::{Error, Result};
 
 const EVENT_TIMEOUT_MS: u32 = 250;
@@ -29,10 +30,15 @@ pub struct Playback {
 
 impl Playback {
     /// Starts playing on the default device what is sent to the returned
-    /// channel (interleaved stereo `f32` at `sample_rate`, the capture's).
-    /// Refuses `avoid`, the device the captured audio comes from: playing
-    /// it back there would loop. Needs nothing from the caller's thread.
-    pub fn start(avoid: &str, sample_rate: u32) -> Result<(Self, Sender<Vec<f32>>)> {
+    /// channel (interleaved `f32` in `layout` at `sample_rate`, the
+    /// capture's). Refuses `avoid`, the device the captured audio comes
+    /// from: playing it back there would loop. Needs nothing from the
+    /// caller's thread.
+    pub fn start(
+        avoid: &str,
+        sample_rate: u32,
+        layout: ChannelLayout,
+    ) -> Result<(Self, Sender<Vec<f32>>)> {
         let (samples_tx, samples_rx) = crossbeam_channel::unbounded();
         let (ready_tx, ready_rx) = crossbeam_channel::bounded(1);
         let stop = Arc::new(AtomicBool::new(false));
@@ -41,7 +47,11 @@ impl Playback {
         let thread = thread::Builder::new()
             .name("resona-playback".into())
             .spawn(move || {
-                if let Err(e) = play(&avoid, sample_rate, &samples_rx, &ready_tx, &thread_stop) {
+                let stream = Stream {
+                    sample_rate,
+                    layout,
+                };
+                if let Err(e) = play(&avoid, stream, &samples_rx, &ready_tx, &thread_stop) {
                     // Before the stream started, `ready` carries the error.
                     let _ = ready_tx.send(Err(e));
                 }
@@ -67,9 +77,19 @@ impl Drop for Playback {
     }
 }
 
+/// The format of the audio played.
+#[derive(Clone, Copy)]
+struct Stream {
+    sample_rate: u32,
+    layout: ChannelLayout,
+}
+
 fn play(
     avoid: &str,
-    sample_rate: u32,
+    Stream {
+        sample_rate,
+        layout,
+    }: Stream,
     samples: &Receiver<Vec<f32>>,
     ready: &Sender<Result<()>>,
     stop: &AtomicBool,
@@ -84,12 +104,13 @@ fn play(
         32,
         &SampleType::Float,
         sample_rate as usize,
-        usize::from(CAPTURE_CHANNELS),
-        None,
+        usize::from(layout.channels),
+        Some(layout.mask),
     );
     let mut client = device.get_iaudioclient()?;
     let (period, _) = client.get_device_period()?;
-    // The headset may run at another rate: Windows converts.
+    // The headset may run at another rate, or hold fewer channels than a
+    // surround capture: Windows converts and mixes down.
     let mode = StreamMode::EventsShared {
         autoconvert: true,
         buffer_duration_hns: period,
@@ -100,7 +121,7 @@ fn play(
     client.start_stream()?;
     let _ = ready.send(Ok(()));
 
-    let channels = usize::from(CAPTURE_CHANNELS);
+    let channels = usize::from(layout.channels);
     let max_queued = MAX_QUEUED_SECS * sample_rate as usize * channels;
     let mut queue: VecDeque<f32> = VecDeque::new();
     while !stop.load(Ordering::Relaxed) {
