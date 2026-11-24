@@ -26,7 +26,7 @@ cargo run -p resona-core --example capture_spotify -- 30 out.flac   # capture + 
 cargo run -p resona-core --example record -- recordings 10          # real recording session, one FLAC per track
 ```
 
-Toolchain pinned in `rust-toolchain.toml` (1.98.0, edition 2024).
+Toolchain pinned in `rust-toolchain.toml` (1.100.0, edition 2024).
 
 ## Layout
 

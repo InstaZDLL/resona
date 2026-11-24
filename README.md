@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/version-0.4.1-2563eb?style=flat-square" alt="Version 0.4.1" />
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11" />
   <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit" />
-  <img src="https://img.shields.io/badge/rust-1.98-orange?style=flat-square&logo=rust" alt="Rust 1.98" />
+  <img src="https://img.shields.io/badge/rust-1.100-orange?style=flat-square&logo=rust" alt="Rust 1.100" />
   <img src="https://img.shields.io/badge/UI-Slint%201.18-2379F4?style=flat-square" alt="Slint 1.18" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT license" />
 </p>
