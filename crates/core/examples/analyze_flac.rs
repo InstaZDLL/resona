@@ -20,10 +20,17 @@ fn main() -> anyhow::Result<()> {
         "{path}: {bits}-bit, {rate} Hz, {channels} ch, {:.1} s",
         samples.len() as f64 / (rate * channels) as f64
     );
-    // A surround file (Dolby Atmos): which channels carry sound. FLAC's
-    // order for 8 channels is 7.1's.
+    // A surround file (Dolby Atmos): which channels carry sound, named in
+    // FLAC's own order for that channel count (RFC 9639).
     if channels > 2 {
-        let names = ["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"];
+        let names: &[&str] = match channels {
+            3 => &["FL", "FR", "FC"],
+            4 => &["FL", "FR", "BL", "BR"],
+            5 => &["FL", "FR", "FC", "BL", "BR"],
+            6 => &["FL", "FR", "FC", "LFE", "BL", "BR"],
+            7 => &["FL", "FR", "FC", "LFE", "BC", "SL", "SR"],
+            _ => &["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"],
+        };
         let full_scale = (1_i64 << (bits - 1)) as f64;
         for channel in 0..channels {
             let peak = samples

@@ -98,13 +98,15 @@ pub enum RecorderEvent {
         /// The device Spotify plays on as found when the capture started,
         /// with [`OutputDevice::lossless_issues`] to warn about.
         device: OutputDevice,
+        /// [`RecorderConfig::surround`] is on but this device (the cable)
+        /// is not set up with a surround speaker layout: recorded in
+        /// stereo. Each capture says it again, so a cable set up as 7.1
+        /// before a retry clears the warning.
+        stereo_cable: bool,
     },
     /// [`RecorderConfig::virtual_cable`] is on but no cable is installed:
     /// Spotify stays on its current device.
     CableMissing,
-    /// [`RecorderConfig::surround`] is on but the cable (named) is not set
-    /// up with a surround speaker layout: recorded in stereo.
-    CableNotSurround(String),
     /// The Windows default output device is the virtual cable: nothing is
     /// heard (VB-Cable's installer does that).
     CableIsDefault(CableAsDefault),
@@ -204,6 +206,8 @@ struct Capture {
     sample_rate: u32,
     /// Of the packets: the device's own, or stereo.
     layout: ChannelLayout,
+    /// Surround asked for on a cable set up in stereo.
+    stereo_cable: bool,
 }
 
 fn start_capture(
@@ -228,9 +232,6 @@ fn start_capture(
     let sample_rate = provider.fixed_rate().unwrap_or(device.sample_rate);
     let surround = config.surround && provider.renders_surround() && cable.is_some();
     let keep_all_channels = surround && device.layout().is_standard_surround();
-    if surround && !keep_all_channels {
-        let _ = events.send(RecorderEvent::CableNotSurround(device.name.clone()));
-    }
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid,
         layout: device.layout(),
@@ -248,6 +249,7 @@ fn start_capture(
         },
         device,
         sample_rate,
+        stereo_cable: surround && !keep_all_channels,
     })
 }
 
@@ -444,6 +446,7 @@ fn run(config: &RecorderConfig, events: &Sender<RecorderEvent>, stop: &Receiver<
                 let _ = events.send(RecorderEvent::CaptureStarted {
                     pid: started.pid,
                     device: started.device.clone(),
+                    stereo_cable: started.stereo_cable,
                 });
                 capture = Some(started);
             }

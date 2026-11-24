@@ -121,11 +121,22 @@ fn print_event(
     let length = |d: Duration| format!("{}:{:02}", d.as_secs() / 60, d.as_secs() % 60);
 
     match event {
-        RecorderEvent::CaptureStarted { pid, device } => {
+        RecorderEvent::CaptureStarted {
+            pid,
+            device,
+            stereo_cable,
+        } => {
             println!(
                 "capture started: {provider} PID {pid}, {} ({} Hz, {} channels)",
                 device.name, device.sample_rate, device.channels
             );
+            if stereo_cable {
+                let cable = &device.name;
+                println!(
+                    "  ⚠ {cable} is not set up as surround: recording in stereo (Sound → {cable} → \
+                     Configure → 7.1 Surround)"
+                );
+            }
             for issue in device.lossless_issues(provider) {
                 match issue {
                     SetupIssue::Enhancements => println!(
@@ -149,10 +160,6 @@ fn print_event(
         RecorderEvent::CableMissing => {
             println!("  ⚠ no virtual cable installed: Spotify stays on its device")
         }
-        RecorderEvent::CableNotSurround(cable) => println!(
-            "  ⚠ {cable} is not set up as surround: recording in stereo (Sound → {cable} → \
-             Configure → 7.1 Surround)"
-        ),
         RecorderEvent::Recording(title) => println!("● recording  {title}"),
         RecorderEvent::AlreadyRecorded {
             title,

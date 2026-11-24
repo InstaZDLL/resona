@@ -185,7 +185,7 @@ impl ChannelLayout {
     /// left out. Scaled so that no output can exceed full scale (as
     /// FFmpeg's default rematrixing does): quieter than the surround mix,
     /// never clipped.
-    fn downmix_gains(self) -> Vec<(f32, f32)> {
+    pub(crate) fn downmix_gains(self) -> Vec<(f32, f32)> {
         use speaker::*;
         const HALF_POWER: f32 = std::f32::consts::FRAC_1_SQRT_2;
         let mut gains: Vec<(f32, f32)> = (0..32)
@@ -250,13 +250,19 @@ pub fn downmix_stereo(interleaved: &[f32], layout: ChannelLayout) -> Vec<f32> {
     let gains = layout.downmix_gains();
     let mut stereo = Vec::with_capacity(interleaved.len() / gains.len() * 2);
     for frame in interleaved.chunks_exact(gains.len()) {
-        let (left, right) = frame
-            .iter()
-            .zip(&gains)
-            .fold((0.0, 0.0), |(l, r), (s, g)| (l + s * g.0, r + s * g.1));
-        stereo.extend_from_slice(&[left, right]);
+        stereo.extend_from_slice(&downmix_frame(frame, &gains));
     }
     stereo
+}
+
+/// One frame of [`downmix_stereo`], with its layout's
+/// [`ChannelLayout::downmix_gains`].
+pub(crate) fn downmix_frame(frame: &[f32], gains: &[(f32, f32)]) -> [f32; 2] {
+    let (left, right) = frame
+        .iter()
+        .zip(gains)
+        .fold((0.0, 0.0), |(l, r), (s, g)| (l + s * g.0, r + s * g.1));
+    [left, right]
 }
 
 #[cfg(test)]

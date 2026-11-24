@@ -446,7 +446,8 @@ fn tied_to_player(notice: &Notice) -> bool {
         | Warning::SpotifyNotLossless
         | Warning::SpotifyVolume
         | Warning::SampleRate
-        | Warning::CableMissing => true,
+        | Warning::CableMissing
+        | Warning::CableNotSurround => true,
         Warning::Error => matches!(
             notice.problem,
             Failure::SpotifyNotRunning
@@ -868,14 +869,31 @@ fn on_recorder_event(window: &AppWindow, (player, event): (&'static str, Recorde
         return;
     };
     match event {
-        RecorderEvent::CaptureStarted { device, .. } => {
+        RecorderEvent::CaptureStarted {
+            device,
+            stereo_cable,
+            ..
+        } => {
             // The device may have changed since the last capture (Spotify
-            // moved to the cable): its warnings are redone, others kept.
+            // moved to the cable, the cable set up as 7.1): its warnings
+            // are redone, others kept.
             let mut kept: Vec<Notice> = notices
                 .iter()
-                .filter(|n| !matches!(n.kind, Warning::Enhancements | Warning::SampleRate))
+                .filter(|n| {
+                    !matches!(
+                        n.kind,
+                        Warning::Enhancements | Warning::SampleRate | Warning::CableNotSurround
+                    )
+                })
                 .collect();
             let name: SharedString = device.name.as_str().into();
+            if stereo_cable {
+                kept.push(Notice {
+                    kind: Warning::CableNotSurround,
+                    device: name.clone(),
+                    ..Notice::default()
+                });
+            }
             let provider = at(&mapping::PROVIDERS, window.get_provider_index());
             for issue in device.lossless_issues(provider) {
                 kept.push(match issue {
@@ -959,16 +977,6 @@ fn on_recorder_event(window: &AppWindow, (player, event): (&'static str, Recorde
             kind: Warning::CableMissing,
             ..Notice::default()
         }),
-        // Once: each capture start would repeat it.
-        RecorderEvent::CableNotSurround(cable) => {
-            if !notices.iter().any(|n| n.kind == Warning::CableNotSurround) {
-                notices.push(Notice {
-                    kind: Warning::CableNotSurround,
-                    device: cable.into(),
-                    ..Notice::default()
-                });
-            }
-        }
         RecorderEvent::CaptureLost | RecorderEvent::AdMuted(_) | RecorderEvent::Spotify(_) => {}
     }
 }

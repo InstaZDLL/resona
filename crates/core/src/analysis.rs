@@ -251,9 +251,10 @@ impl BitAnalysis {
         self.peak == 0.0 && !self.is_surround()
     }
 
-    /// The capture is an exact image of an integer PCM stream.
+    /// The capture is an exact image of an integer PCM stream. Never for
+    /// a surround one: only its front pair is examined.
     pub fn is_bit_transparent(&self) -> bool {
-        !self.is_silent() && self.not_24_bit == 0 && self.clipped == 0
+        !self.is_silent() && !self.is_surround() && self.not_24_bit == 0 && self.clipped == 0
     }
 
     pub fn fidelity(&self) -> Fidelity {
@@ -719,5 +720,8 @@ mod tests {
         assert!(surround.is_surround() && !surround.is_silent());
         assert_eq!(surround.fidelity(), Fidelity::Surround { channels: 8 });
         assert_eq!(surround.fidelity().lossless_depth(), 24);
+        // Its silent front pair says nothing about the other channels.
+        assert!(!surround.is_bit_transparent());
+        assert_eq!(surround.effective_depth(), None);
     }
 }

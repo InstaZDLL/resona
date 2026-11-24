@@ -8,7 +8,7 @@ pub mod mp3;
 pub mod wav;
 
 use crate::analysis::quantize;
-use crate::format::{ChannelLayout, downmix_stereo};
+use crate::format::{ChannelLayout, downmix_frame};
 use crate::{Error, Result};
 
 /// Which channels of the intermediate WAV go into the output file.
@@ -40,6 +40,8 @@ pub(crate) struct Remix<I> {
     samples: I,
     source: usize,
     channels: Channels,
+    /// Of [`Channels::Downmix`], computed once.
+    gains: Vec<(f32, f32)>,
     frame: Vec<f32>,
     out: Vec<f32>,
     next: usize,
@@ -63,6 +65,10 @@ impl<I: Iterator<Item = hound::Result<f32>>> Remix<I> {
             samples,
             source,
             channels,
+            gains: match channels {
+                Channels::Downmix(layout) => layout.downmix_gains(),
+                _ => Vec::new(),
+            },
             frame: Vec::with_capacity(source),
             out: Vec::with_capacity(source),
             next: 0,
@@ -85,7 +91,9 @@ impl<I: Iterator<Item = hound::Result<f32>>> Remix<I> {
         match self.channels {
             Channels::FrontPair => self.out.extend_from_slice(&self.frame[..2]),
             Channels::All(_) => self.out.extend_from_slice(&self.frame),
-            Channels::Downmix(layout) => self.out.extend(downmix_stereo(&self.frame, layout)),
+            Channels::Downmix(_) => self
+                .out
+                .extend_from_slice(&downmix_frame(&self.frame, &self.gains)),
         }
         self.next = 0;
         Ok(true)
