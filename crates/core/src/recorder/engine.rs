@@ -894,12 +894,17 @@ fn encode(
         }
         OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps, channels)?,
     }
-    let (tags, mut outcome) = metadata::tags_for(
+    let (mut tags, mut outcome) = metadata::tags_for(
         catalogues.deezer.as_ref(),
         catalogues.spotify.as_ref(),
         &job.ended.track,
         job.uri.as_deref(),
     );
+    // FLAC has no mask of its own: the speakers of the channels kept are
+    // named in a comment (the WAV output has them in its header).
+    if let Channels::Surround { kept, .. } = channels {
+        tags.channel_mask = Some(kept.mask);
+    }
     // Best effort: the audio is the recording, and once moved into the
     // folder it must not be reported as failed for want of tags.
     if let Err(e) = tags.write(&staged, format) {
