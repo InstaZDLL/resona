@@ -110,10 +110,10 @@ fn print_event(
     let quality = |fidelity: Fidelity| match fidelity {
         Fidelity::BitPerfect { depth, touched: 0 } => format!("bit-perfect {depth}-bit"),
         Fidelity::BitPerfect { depth, touched } => {
-            format!("bit-perfect {depth}-bit, {touched} samples touched by Spotify")
+            format!("bit-perfect {depth}-bit, {touched} samples touched by {provider}")
         }
         Fidelity::NearTransparent => "near-transparent 24-bit".into(),
-        Fidelity::PeakLimited => "peaks limited by Spotify, 24-bit".into(),
+        Fidelity::PeakLimited => format!("peaks limited by {provider}, 24-bit"),
         Fidelity::Processed => "PROCESSED (check audio settings)".into(),
         Fidelity::Silent => "silent".into(),
         Fidelity::Surround { channels } => format!("surround, {channels} channels (Dolby Atmos)"),

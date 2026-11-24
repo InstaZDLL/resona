@@ -99,7 +99,7 @@ pub fn export_wav(
     }
     writer.finalize()?;
     match channels {
-        Channels::All(layout) => set_channel_mask(dst, layout),
+        Channels::Surround { kept, .. } => set_channel_mask(dst, kept),
         Channels::FrontPair | Channels::Downmix(_) => Ok(()),
     }
 }
@@ -191,7 +191,7 @@ mod tests {
             &capture,
             &out,
             Quantizer::new(24, 24),
-            Channels::All(layout),
+            Channels::all(layout),
         )
         .unwrap();
         assert_eq!(channel_mask(&out), 0x63f);

@@ -213,8 +213,8 @@ msgstr "Langue"
 msgid "For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect."
 msgstr "Pour enregistrer sans perte : Spotify en qualité Lossless, volume au maximum, normalisation, égaliseur, fondu enchaîné et Automix désactivés ; améliorations audio de Windows désactivées et périphérique de sortie à 44100 Hz. Chaque morceau enregistré indique s'il est sorti bit-perfect."
 
-msgid "For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge). Each saved track says whether it came out bit-perfect."
-msgstr "Pour enregistrer sans perte : dans Apple Music, Audio sans perte activé et Diffusion en continu réglée sur Lossless, volume au maximum, Égaliseur de volume, Optimiseur de son, fondu enchaîné et Dolby Atmos désactivés ; améliorations audio de Windows et égaliseur du casque désactivés, et périphérique de sortie à la fréquence du morceau (44100 ou 48000 Hz, indiquée par le badge Lossless d'Apple Music). Chaque morceau enregistré indique s'il est sorti bit-perfect."
+msgid "For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge; the virtual cable takes that device's rate). Each saved track says whether it came out bit-perfect."
+msgstr "Pour enregistrer sans perte : dans Apple Music, Audio sans perte activé et Diffusion en continu réglée sur Lossless, volume au maximum, Égaliseur de volume, Optimiseur de son, fondu enchaîné et Dolby Atmos désactivés ; améliorations audio de Windows et égaliseur du casque désactivés, et périphérique de sortie à la fréquence du morceau (44100 ou 48000 Hz, indiquée par le badge Lossless d'Apple Music ; le câble virtuel prend la fréquence de ce périphérique). Chaque morceau enregistré indique s'il est sorti bit-perfect."
 
 msgid "⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off."
 msgstr "⚠ « {} » commence par un fondu ajouté par Spotify : le fondu enchaîné ou Automix est activé, et les changements de morceau ne sont pas sans perte. Spotify → Paramètres → Lecture → désactivez Fondu enchaîné et Automix."
@@ -259,8 +259,8 @@ msgstr "⚠ « {} » est configuré en stéréo : Dolby Atmos est enregistré en
 msgid "Keep Dolby Atmos in surround"
 msgstr "Garder Dolby Atmos en surround"
 
-msgid "With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their 8 channels (MP3: mixed down to stereo). Atmos is lossy: this is its 7.1 render, not a lossless source."
-msgstr "Avec le câble configuré en 7.1 Surround et Dolby Atmos activé dans {}, les morceaux Atmos gardent leurs 8 canaux (MP3 : mixés en stéréo). Atmos est un format avec perte : c'est son rendu 7.1, pas une source sans perte."
+msgid "With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their surround channels: 7.1, or 5.1 when the side pair stays silent (MP3: mixed down to stereo). Atmos is lossy: this is its render, not a lossless source."
+msgstr "Avec le câble configuré en 7.1 Surround et Dolby Atmos activé dans {}, les morceaux Atmos gardent leurs canaux surround : 7.1, ou 5.1 quand la paire latérale reste muette (MP3 : mixés en stéréo). Atmos est un format avec perte : c'est son rendu, pas une source sans perte."
 
 msgid "⚠ Tracks altered on their way out of {}: {} (last: \"{}\"). Check its volume and the audio settings."
 msgstr "⚠ Morceaux modifiés entre {} et l'enregistrement : {} (dernier : « {} »). Vérifiez son volume et les réglages audio."

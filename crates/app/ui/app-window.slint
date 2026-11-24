@@ -754,7 +754,7 @@ export component AppWindow inherits Window {
                             }
                             if root.surround-capable: Option {
                                 text: @tr("Keep Dolby Atmos in surround");
-                                hint: @tr("With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their 8 channels (MP3: mixed down to stereo). Atmos is lossy: this is its 7.1 render, not a lossless source.", root.player);
+                                hint: @tr("With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their surround channels: 7.1, or 5.1 when the side pair stays silent (MP3: mixed down to stereo). Atmos is lossy: this is its render, not a lossless source.", root.player);
                                 enabled: root.virtual-cable;
                                 checked <=> root.surround;
                                 toggled => { root.settings-changed(); }
@@ -829,7 +829,7 @@ export component AppWindow inherits Window {
                         if root.settings-tab == 2 && root.show-audio-help: Text {
                             text: root.spotify-tools
                                 ? @tr("For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect.")
-                                : @tr("For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge). Each saved track says whether it came out bit-perfect.");
+                                : @tr("For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge; the virtual cable takes that device's rate). Each saved track says whether it came out bit-perfect.");
                             wrap: word-wrap;
                             color: #6e6e73;
                             font-size: 12px;
