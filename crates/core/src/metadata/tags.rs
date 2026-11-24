@@ -324,7 +324,13 @@ mod tests {
         let mut writer = CaptureWav::create(&wav, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&[0.25; 8_820]).unwrap();
         writer.finalize().unwrap();
-        encode_wav_to_flac(&wav, &flac, crate::encode::Quantizer::new(16, 16)).unwrap();
+        encode_wav_to_flac(
+            &wav,
+            &flac,
+            crate::encode::Quantizer::new(16, 16),
+            crate::encode::Channels::FrontPair,
+        )
+        .unwrap();
         let checksum = std::fs::read(&flac).unwrap()[26..42].to_vec();
 
         let mut tags = TrackTags::from_spotify(&spotify_track());
@@ -365,7 +371,7 @@ mod tests {
         let mut writer = CaptureWav::create(&wav, crate::format::CAPTURE_SAMPLE_RATE).unwrap();
         writer.write(&[0.25; 88_200]).unwrap();
         writer.finalize().unwrap();
-        encode_wav_to_mp3(&wav, &mp3, 192).unwrap();
+        encode_wav_to_mp3(&wav, &mp3, 192, crate::encode::Channels::FrontPair).unwrap();
 
         let mut tags = TrackTags::from_spotify(&spotify_track());
         tags.genres = vec!["Electro".into(), "Dance".into()];

@@ -104,6 +104,14 @@ impl Provider {
         }
     }
 
+    /// Renders a multichannel mix on a surround device: Apple Music's
+    /// Dolby Atmos, as 7.1 PCM on a cable set up as 7.1 (measured
+    /// 2026-11-23, `docs/PLAN.md`; a headset set up as 7.1 still gets
+    /// stereo). Spotify plays stereo.
+    pub fn renders_surround(self) -> bool {
+        self == Self::AppleMusic
+    }
+
     /// Spotify's command-line tool and preferences file: exact catalogue
     /// entries, playlist mode, the settings check.
     pub fn has_spotify_tools(self) -> bool {

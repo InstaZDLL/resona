@@ -13,21 +13,24 @@ use std::time::Instant;
 use crossbeam_channel::{Receiver, Sender};
 use wasapi::{AudioClient, Direction, SampleType, StreamMode, WaveFormat};
 
-use crate::format::front_stereo;
+use crate::format::{ChannelLayout, front_stereo, other_channels_peak};
 use crate::{Error, Result};
 
 /// How long the capture thread blocks waiting for audio before checking
 /// the stop flag. Paused Spotify sends nothing or silence, by build.
 const EVENT_TIMEOUT_MS: u32 = 250;
 
-/// Interleaved stereo `f32` samples at [`CaptureConfig::sample_rate`].
+/// Interleaved `f32` samples at [`CaptureConfig::sample_rate`]: stereo, or
+/// every channel of the device with [`CaptureConfig::keep_all_channels`].
 #[derive(Debug)]
 pub struct Packet {
     pub samples: Vec<f32>,
+    /// Channels per frame in `samples`.
+    pub channels: u16,
     /// WASAPI dropped audio before this packet (the reader fell behind).
     pub discontinuity: bool,
     /// Peak of the channels beyond front left / right, when the device is
-    /// multichannel. Non-zero means Spotify spread the music over them and
+    /// multichannel. Non-zero means the app spread the music over them and
     /// the front pair alone is not the whole signal.
     pub other_channels_peak: f32,
     /// When the packet was read: maps frames to wall-clock time
@@ -46,14 +49,13 @@ pub struct CaptureConfig {
     /// process alone" mode. (wasapi's `include_tree: false` is not that: it
     /// captures everything *except* the tree.)
     pub pid: u32,
-    /// The output device's channel count (see
-    /// [`crate::audio_setup::OutputDevice::channels`]): the stream is
-    /// captured in that layout, so Windows never downmixes it, and reduced
-    /// to the front pair here.
-    pub source_channels: u16,
-    /// The device's speaker layout, so that no remapping between layouts
-    /// happens either.
-    pub channel_mask: u32,
+    /// The output device's channels and speaker layout (see
+    /// [`crate::audio_setup::OutputDevice::layout`]): the stream is captured
+    /// in that layout, so Windows never downmixes or remaps it.
+    pub layout: ChannelLayout,
+    /// Hand every channel on (Apple Music's Dolby Atmos render on a
+    /// surround cable). Otherwise only the front pair is.
+    pub keep_all_channels: bool,
     /// Requested from Windows, which resamples to it if the process renders
     /// at another rate. [`crate::format::CAPTURE_SAMPLE_RATE`] for Spotify.
     pub sample_rate: u32,
@@ -123,8 +125,8 @@ fn capture_thread(
         32,
         &SampleType::Float,
         config.sample_rate as usize,
-        usize::from(config.source_channels),
-        Some(config.channel_mask),
+        usize::from(config.layout.channels),
+        Some(config.layout.mask),
     );
     let started = (|| -> Result<_> {
         let mut client = AudioClient::new_application_loopback_client(config.pid, true)?;
@@ -173,10 +175,17 @@ fn capture_thread(
                     .map(|&b| f32::from_le_bytes(b))
                     .collect()
             };
-            let (samples, other_channels_peak) =
-                front_stereo(&interleaved, usize::from(config.source_channels));
+            let source = usize::from(config.layout.channels);
+            let (samples, channels, other_channels_peak) = if config.keep_all_channels {
+                let peak = other_channels_peak(&interleaved, source);
+                (interleaved, config.layout.channels, peak)
+            } else {
+                let (stereo, peak) = front_stereo(&interleaved, source);
+                (stereo, ChannelLayout::STEREO.channels, peak)
+            };
             let packet = Packet {
                 samples,
+                channels,
                 discontinuity: info.flags.data_discontinuity,
                 other_channels_peak,
                 received_at: Instant::now(),

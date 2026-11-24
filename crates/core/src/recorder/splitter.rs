@@ -52,7 +52,8 @@ pub enum Action {
     Begin {
         track: Track,
     },
-    /// Interleaved stereo samples for the current track.
+    /// Interleaved samples for the current track, in the splitter's
+    /// channel count.
     Write(Vec<f32>),
     End(Ended),
 }
@@ -125,10 +126,12 @@ struct Active {
 
 pub struct Splitter {
     sample_rate: u32,
+    /// Per frame of the audio fed and written.
+    channels: usize,
     horizon: u64,
     settle: u64,
     edge_silence: u64,
-    /// Held-back audio, interleaved stereo, starting at `buffer_start`.
+    /// Held-back audio, interleaved, starting at `buffer_start`.
     buffer: VecDeque<f32>,
     buffer_start: u64,
     pending: Vec<Pending>,
@@ -137,10 +140,13 @@ pub struct Splitter {
 }
 
 impl Splitter {
-    pub fn new(sample_rate: u32) -> Self {
+    /// For audio at `sample_rate`, `channels` interleaved per frame.
+    pub fn new(sample_rate: u32, channels: u16) -> Self {
+        debug_assert!(channels >= 1);
         let frames = |d: Duration| (d.as_secs_f64() * f64::from(sample_rate)) as u64;
         Self {
             sample_rate,
+            channels: usize::from(channels),
             horizon: frames(HORIZON),
             settle: frames(DETAILS_SETTLE),
             edge_silence: frames(EDGE_SILENCE),
@@ -154,7 +160,7 @@ impl Splitter {
 
     /// Frame index just past the last audio received.
     pub fn end_frame(&self) -> u64 {
-        self.buffer_start + (self.buffer.len() / 2) as u64
+        self.buffer_start + (self.buffer.len() / self.channels) as u64
     }
 
     pub fn push_audio(&mut self, samples: &[f32]) -> Vec<Action> {
@@ -262,7 +268,7 @@ impl Splitter {
                 let (front, back) = self.buffer.as_slices();
                 let held: Vec<f32> = front.iter().chain(back).copied().collect();
                 let search = self.search(&pending);
-                let cut = place_cut(&held, self.buffer_start, search);
+                let cut = place_cut(&held, self.channels as u16, self.buffer_start, search);
                 // What placed each cut, to check them against a recording.
                 let ms = |frame: u64| frame as i64 * 1000 / i64::from(self.sample_rate);
                 tracing::info!(
@@ -422,7 +428,7 @@ impl Splitter {
             // The track's trailing silence.
             let trailing = active.held_zeros.min(self.edge_silence);
             if trailing > 0 {
-                actions.push(Action::Write(vec![0.0; (trailing * 2) as usize]));
+                actions.push(Action::Write(vec![0.0; trailing as usize * self.channels]));
                 active.frames += trailing;
             }
             actions.push(Action::End(Ended {
@@ -438,8 +444,8 @@ impl Splitter {
     fn skip_until(&mut self, frame: u64) {
         let count = frame
             .saturating_sub(self.buffer_start)
-            .min((self.buffer.len() / 2) as u64);
-        self.buffer.drain(..(count * 2) as usize);
+            .min((self.buffer.len() / self.channels) as u64);
+        self.buffer.drain(..count as usize * self.channels);
         self.buffer_start += count;
     }
 
@@ -448,16 +454,17 @@ impl Splitter {
         if frame <= self.buffer_start {
             return;
         }
-        let count = ((frame - self.buffer_start) * 2) as usize;
+        let channels = self.channels;
+        let count = (frame - self.buffer_start) as usize * channels;
         let samples: Vec<f32> = self.buffer.drain(..count.min(self.buffer.len())).collect();
-        self.buffer_start = frame.min(self.buffer_start + (samples.len() / 2) as u64);
+        self.buffer_start = frame.min(self.buffer_start + (samples.len() / channels) as u64);
         let Some(active) = self.active.as_mut() else {
             return;
         };
 
         let mut out = Vec::with_capacity(samples.len());
-        for frame in samples.as_chunks::<2>().0 {
-            let silent = frame[0] == 0.0 && frame[1] == 0.0;
+        for frame in samples.chunks_exact(channels) {
+            let silent = frame.iter().all(|&s| s == 0.0);
             if silent {
                 // Paused: Spotify sends digital silence, which is not part
                 // of the track. Otherwise it is the track's own silence.
@@ -474,9 +481,7 @@ impl Splitter {
                 // The track's leading silence.
                 active.held_zeros = active.held_zeros.min(self.edge_silence);
             }
-            for _ in 0..active.held_zeros {
-                out.extend_from_slice(&[0.0, 0.0]);
-            }
+            out.resize(out.len() + active.held_zeros as usize * channels, 0.0);
             active.frames += active.held_zeros + 1;
             active.held_zeros = 0;
             out.extend_from_slice(frame);
@@ -522,7 +527,7 @@ mod tests {
     impl Run {
         fn new() -> Self {
             Self {
-                splitter: Splitter::new(RATE),
+                splitter: Splitter::new(RATE, 2),
                 actions: Vec::new(),
             }
         }
@@ -582,6 +587,48 @@ mod tests {
         assert_eq!(tracks[0], ("One".into(), vec![0.1], 5 * SECOND));
         assert_eq!(tracks[1].1, vec![0.2]);
         assert_eq!(tracks[1].2, 5 * SECOND + SECOND / 2);
+    }
+
+    #[test]
+    fn carries_every_channel_of_a_surround_capture() {
+        // 7.1 frames with the front pair silent and sound elsewhere: still
+        // music, not silence. A 100 ms gap where every channel is silent
+        // separates the tracks.
+        let frame = |level: f32| [0.0, 0.0, level, level, level, level, level, level];
+        let surround = |level: f32, frames: u64| -> Vec<f32> {
+            (0..frames).flat_map(|_| frame(level)).collect()
+        };
+        let mut splitter = Splitter::new(RATE, 8);
+        let mut actions = Vec::new();
+        splitter.change(0, Change::Content(Content::Track(track("One"))));
+        actions.extend(splitter.push_audio(&surround(0.1, 2 * SECOND)));
+        actions.extend(splitter.push_audio(&surround(0.0, SECOND / 10)));
+        actions.extend(splitter.push_audio(&surround(0.2, SECOND / 2)));
+        assert_eq!(splitter.end_frame(), 2 * SECOND + SECOND / 10 + SECOND / 2);
+        splitter.change(
+            2 * SECOND + SECOND / 5,
+            Change::Content(Content::Track(track("Two"))),
+        );
+        actions.extend(splitter.push_audio(&surround(0.2, 4 * SECOND)));
+        actions.extend(splitter.finish());
+
+        let mut written = Vec::new();
+        let mut ended = Vec::new();
+        for action in actions {
+            match action {
+                Action::Begin { .. } => written.push(Vec::new()),
+                Action::Write(samples) => written.last_mut().unwrap().extend(samples),
+                Action::End(end) => ended.push(end.frames),
+            }
+        }
+        assert_eq!(written.len(), 2);
+        for (samples, frames) in written.iter().zip(&ended) {
+            assert_eq!(samples.len() as u64, frames * 8);
+        }
+        // The gap stays with One, Two starts on its first sound.
+        assert_eq!(ended[0], 2 * SECOND + SECOND / 10);
+        assert_eq!(written[1][..8], frame(0.2));
+        assert!(!written[1].contains(&0.1));
     }
 
     #[test]

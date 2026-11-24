@@ -32,6 +32,9 @@ msgstr "crêtes limitées par {}"
 msgid "altered"
 msgstr "modifié"
 
+msgid "Dolby Atmos {} ch"
+msgstr "Dolby Atmos {} canaux"
+
 # Header and now playing
 msgid "⚙ Settings"
 msgstr "⚙ Réglages"
@@ -249,6 +252,15 @@ msgstr "⚠ Automix de Spotify est activé : il mixe les transitions des playlis
 
 msgid "⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings."
 msgstr "⚠ Spotify ne lit pas en Lossless. Spotify → Paramètres → Qualité audio → Lossless, ou changez la qualité Spotify dans les réglages de Resona."
+
+msgid "⚠ \"{}\" is set up as stereo: Dolby Atmos is recorded in stereo. Sound control panel → Playback → that device → Configure → 7.1 Surround."
+msgstr "⚠ « {} » est configuré en stéréo : Dolby Atmos est enregistré en stéréo. Panneau de configuration Son → Lecture → ce périphérique → Configurer → 7.1 Surround."
+
+msgid "Keep Dolby Atmos in surround"
+msgstr "Garder Dolby Atmos en surround"
+
+msgid "With the cable set up as 7.1 Surround and Dolby Atmos on in {}, Atmos tracks keep their 8 channels (MP3: mixed down to stereo). Atmos is lossy: this is its 7.1 render, not a lossless source."
+msgstr "Avec le câble configuré en 7.1 Surround et Dolby Atmos activé dans {}, les morceaux Atmos gardent leurs 8 canaux (MP3 : mixés en stéréo). Atmos est un format avec perte : c'est son rendu 7.1, pas une source sans perte."
 
 msgid "⚠ Tracks altered on their way out of {}: {} (last: \"{}\"). Check its volume and the audio settings."
 msgstr "⚠ Morceaux modifiés entre {} et l'enregistrement : {} (dernier : « {} »). Vérifiez son volume et les réglages audio."

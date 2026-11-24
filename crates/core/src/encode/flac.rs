@@ -8,18 +8,32 @@ use flac_bound::{FlacEncoder, WriteWrapper};
 use hound::{SampleFormat, WavReader};
 use md5::{Digest, Md5};
 
-use super::Quantizer;
+use super::{Channels, Quantizer, Remix};
 use crate::{Error, Result};
 
 /// Encodes an intermediate float WAV (see [`super::wav::CaptureWav`]) to
 /// FLAC at the quantizer's depth (16 or 24 bits).
-pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Result<()> {
+///
+/// FLAC has no channel mask of its own: from 3 to 8 channels it names
+/// them in WAVE's order for the usual layouts (8: FL FR FC LFE BL BR SL
+/// SR), which [`crate::format::ChannelLayout::is_standard_surround`] keeps
+/// to.
+pub fn encode_wav_to_flac(
+    src: &Path,
+    dst: &Path,
+    quantizer: Quantizer,
+    channels: Channels,
+) -> Result<()> {
     debug_assert!(quantizer.bits() == 16 || quantizer.bits() == 24);
+    if let Channels::All(layout) = channels {
+        debug_assert!(layout.is_stereo() || layout.is_standard_surround());
+    }
     let mut reader = WavReader::open(src)?;
-    let spec = reader.spec();
-    if spec.sample_format != SampleFormat::Float || spec.bits_per_sample != 32 {
+    let source = reader.spec();
+    if source.sample_format != SampleFormat::Float || source.bits_per_sample != 32 {
         return Err(Error::UnsupportedWav("expected 32-bit float samples"));
     }
+    let output_channels = channels.count();
     let sample_frames = reader.duration();
     let bits = quantizer.bits();
 
@@ -37,9 +51,9 @@ pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Resul
         let mut writer = WriteWrapper(&mut output);
         let config = FlacEncoder::new()
             .ok_or_else(|| Error::Flac("could not create FLAC encoder".into()))?
-            .channels(u32::from(spec.channels))
+            .channels(u32::from(output_channels))
             .bits_per_sample(u32::from(bits))
-            .sample_rate(spec.sample_rate)
+            .sample_rate(source.sample_rate)
             .total_samples_estimate(u64::from(sample_frames))
             .compression_level(5)
             .verify(true);
@@ -47,11 +61,12 @@ pub fn encode_wav_to_flac(src: &Path, dst: &Path, quantizer: Quantizer) -> Resul
             .init_write(&mut writer)
             .map_err(|e| Error::Flac(format!("could not initialize FLAC encoder: {e:?}")))?;
 
-        let channels = usize::from(spec.channels);
+        let samples = Remix::new(reader.samples::<f32>(), source.channels, channels)?;
+        let channels = usize::from(output_channels);
         let mut quantizer = quantizer;
         let mut buffer = Vec::with_capacity(4096 * channels);
         let mut pcm_bytes = Vec::with_capacity(4096 * channels * usize::from(bits / 8));
-        for sample in reader.samples::<f32>() {
+        for sample in samples {
             let quantized = quantizer.quantize(sample?);
             buffer.push(quantized);
             pcm_bytes.extend_from_slice(&quantized.to_le_bytes()[..usize::from(bits / 8)]);
@@ -114,7 +129,13 @@ mod tests {
         wav.write(&samples).unwrap();
         wav.finalize().unwrap();
 
-        encode_wav_to_flac(&wav_path, &flac_path, Quantizer::new(24, 24)).unwrap();
+        encode_wav_to_flac(
+            &wav_path,
+            &flac_path,
+            Quantizer::new(24, 24),
+            Channels::FrontPair,
+        )
+        .unwrap();
         let bytes = std::fs::read(&flac_path).unwrap();
         assert_eq!(&bytes[..4], b"fLaC");
         // STREAMINFO: bits-per-sample minus one sits across bytes 20-21.
@@ -144,5 +165,43 @@ mod tests {
         }
         assert_eq!(&bytes[26..42], pcm_md5.finalize().as_slice());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn encodes_every_channel_of_a_7_1_track() {
+        use crate::format::ChannelLayout;
+        const RATE: u32 = 48_000;
+        let dir = std::env::temp_dir().join(format!("resona-flac71-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (wav_path, flac_path) = (dir.join("in.wav"), dir.join("out.flac"));
+        let layout = ChannelLayout::SURROUND_7_1;
+        // A tenth of a second, each channel its own ramp.
+        let samples: Vec<f32> = (0..RATE as i32 / 10)
+            .flat_map(|frame| {
+                (0..8).map(move |channel| ((frame * (channel + 1) * 37) % 65_536 - 32_768) as f32)
+            })
+            .map(|v| v / 8_388_608.0)
+            .collect();
+        let mut wav = CaptureWav::with_layout(&wav_path, RATE, layout).unwrap();
+        wav.write(&samples).unwrap();
+        wav.finalize().unwrap();
+
+        encode_wav_to_flac(
+            &wav_path,
+            &flac_path,
+            Quantizer::new(24, 24),
+            Channels::All(layout),
+        )
+        .unwrap();
+        let mut reader = claxon::FlacReader::open(&flac_path).unwrap();
+        assert_eq!(reader.streaminfo().channels, 8);
+        assert_eq!(reader.streaminfo().bits_per_sample, 24);
+        let decoded: Vec<i32> = reader.samples().map(Result::unwrap).collect();
+        let expected: Vec<i32> = samples
+            .iter()
+            .map(|&s| Quantizer::new(24, 24).quantize(s))
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(decoded, expected);
     }
 }

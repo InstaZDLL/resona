@@ -49,6 +49,9 @@ pub enum Error {
     #[error("unsupported intermediate WAV: {0}")]
     UnsupportedWav(&'static str),
 
+    #[error("the track's intermediate WAV reached the 4 GiB a WAV file can hold")]
+    WavFull,
+
     #[cfg(windows)]
     #[error("Windows API error: {0}")]
     Windows(#[from] windows::core::Error),

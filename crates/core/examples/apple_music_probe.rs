@@ -13,6 +13,7 @@
 //! ```text
 //! cargo run -p resona-core --example apple_music_probe -- [seconds]
 //! RESONA_PROBE_CABLE=1: moves the agent to the virtual cable 5 s in, back 30 s in
+//! RESONA_PROBE_DEVICE=<part of a name>: plays the agent on that device for the run
 //! ```
 
 #[cfg(windows)]
@@ -136,8 +137,9 @@ fn main() -> anyhow::Result<()> {
     println!("capture target PID {target}");
     let (capture, packets) = ProcessCapture::start(CaptureConfig {
         pid: target,
-        source_channels: device.channels,
-        channel_mask: device.channel_mask,
+        layout: device.layout(),
+        // The front pair is analysed; the others are only measured.
+        keep_all_channels: false,
         sample_rate: device.sample_rate,
     })?;
     let mut analysis = BitAnalysis::default();

@@ -1,6 +1,6 @@
 //! Where a saved FLAC departs from integer 16-bit audio: overall, and per
 //! second, to tell a processed whole track from processed moments (a fade
-//! at a pause, a cut).
+//! at a pause, a cut). For a surround file, the peak of each channel.
 //!
 //! ```text
 //! cargo run -p resona-core --example analyze_flac -- "Artist - Title.flac"
@@ -20,6 +20,33 @@ fn main() -> anyhow::Result<()> {
         "{path}: {bits}-bit, {rate} Hz, {channels} ch, {:.1} s",
         samples.len() as f64 / (rate * channels) as f64
     );
+    // A surround file (Dolby Atmos): which channels carry sound, named in
+    // FLAC's own order for that channel count (RFC 9639).
+    if channels > 2 {
+        let names: &[&str] = match channels {
+            3 => &["FL", "FR", "FC"],
+            4 => &["FL", "FR", "BL", "BR"],
+            5 => &["FL", "FR", "FC", "BL", "BR"],
+            6 => &["FL", "FR", "FC", "LFE", "BL", "BR"],
+            7 => &["FL", "FR", "FC", "LFE", "BC", "SL", "SR"],
+            _ => &["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"],
+        };
+        let full_scale = (1_i64 << (bits - 1)) as f64;
+        for channel in 0..channels {
+            let peak = samples
+                .iter()
+                .skip(channel)
+                .step_by(channels)
+                .map(|s| s.unsigned_abs())
+                .max()
+                .unwrap_or(0);
+            println!(
+                "  channel {channel} ({}): peak {:.1} dBFS",
+                names.get(channel).unwrap_or(&"?"),
+                20.0 * (f64::from(peak) / full_scale).log10()
+            );
+        }
+    }
     if bits != 24 {
         println!("not a 24-bit file: nothing finer than its own grid to look for");
         return Ok(());

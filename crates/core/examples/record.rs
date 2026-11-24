@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run -p resona-core --example record -- [output dir] [minutes] [--keep-partial] [--cable|--no-cable] [--listen] [--spotify|--apple]
-//!     [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
+//!     [--surround|--stereo] [--format=flac|flac16|flac24|wav|wav16|wav24|mp3|mp3:<kbps>]
 //! ```
 
 #[cfg(windows)]
@@ -37,6 +37,12 @@ fn main() -> anyhow::Result<()> {
     }
     if args.iter().any(|a| a == "--listen") {
         settings.listen = true;
+    }
+    if args.iter().any(|a| a == "--surround") {
+        settings.surround = true;
+    }
+    if args.iter().any(|a| a == "--stereo") {
+        settings.surround = false;
     }
     if args.iter().any(|a| a == "--apple") {
         settings.provider = resona_core::provider::Provider::AppleMusic;
@@ -110,15 +116,27 @@ fn print_event(
         Fidelity::PeakLimited => "peaks limited by Spotify, 24-bit".into(),
         Fidelity::Processed => "PROCESSED (check audio settings)".into(),
         Fidelity::Silent => "silent".into(),
+        Fidelity::Surround { channels } => format!("surround, {channels} channels (Dolby Atmos)"),
     };
     let length = |d: Duration| format!("{}:{:02}", d.as_secs() / 60, d.as_secs() % 60);
 
     match event {
-        RecorderEvent::CaptureStarted { pid, device } => {
+        RecorderEvent::CaptureStarted {
+            pid,
+            device,
+            stereo_cable,
+        } => {
             println!(
                 "capture started: {provider} PID {pid}, {} ({} Hz, {} channels)",
                 device.name, device.sample_rate, device.channels
             );
+            if stereo_cable {
+                let cable = &device.name;
+                println!(
+                    "  ⚠ {cable} is not set up as surround: recording in stereo (Sound → {cable} → \
+                     Configure → 7.1 Surround)"
+                );
+            }
             for issue in device.lossless_issues(provider) {
                 match issue {
                     SetupIssue::Enhancements => println!(

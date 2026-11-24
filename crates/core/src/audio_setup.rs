@@ -19,7 +19,7 @@ use windows::Win32::System::Registry::{
 use windows::core::{HSTRING, Interface};
 
 use crate::Result;
-use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE, ChannelLayout};
 use crate::provider::Provider;
 
 #[derive(Debug, Clone)]
@@ -80,6 +80,14 @@ impl OutputDevice {
     /// a resampler somewhere before our capture.
     pub fn resamples(&self) -> bool {
         self.sample_rate != CAPTURE_SAMPLE_RATE
+    }
+
+    /// The device's channels and their speakers.
+    pub fn layout(&self) -> ChannelLayout {
+        ChannelLayout {
+            channels: self.channels,
+            mask: self.channel_mask,
+        }
     }
 
     pub fn downmixes(&self) -> bool {
