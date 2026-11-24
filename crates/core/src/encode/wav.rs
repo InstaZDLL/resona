@@ -62,10 +62,12 @@ impl CaptureWav {
         if !fits(self.data_bytes, samples.len()) {
             return Err(Error::WavFull);
         }
+        // Counted as hound takes them: a write failing halfway leaves the
+        // count on what the file holds.
         for &sample in samples {
             self.writer.write_sample(sample)?;
+            self.data_bytes += 4;
         }
-        self.data_bytes += 4 * samples.len() as u64;
         Ok(())
     }
 
