@@ -263,7 +263,7 @@ struct CableRoute {
 }
 
 impl CableRoute {
-    /// Sets the cable's rate (see [`cable_rate`]) and sends `provider`'s
+    /// Sets the cable's rate (see [`align_cable_rate`]) and sends `provider`'s
     /// sound (its [`AppProcesses::audio_root`] `pid`) to it. `None`, with an
     /// event saying why, when that fails.
     fn enter(provider: Provider, pid: u32, events: &Sender<RecorderEvent>) -> Option<Self> {
@@ -286,13 +286,19 @@ impl CableRoute {
             None
         });
         // Set before the app is sent there: a rate changed under a playing
-        // stream silences Apple Music until it is restarted. If this fails,
-        // the capture's setup warning says so.
-        if let Some(rate) = cable_rate(provider, pid)
-            && audio_setup::output_device(&cable_id).is_ok_and(|d| d.sample_rate != rate)
-            && let Err(e) = device_config::set_sample_rate(&cable_id, rate)
-        {
-            tracing::warn!("cannot set the cable to {rate} Hz: {e}");
+        // stream silences Apple Music until it is restarted.
+        if let Err(e) = align_cable_rate(provider, pid, &cable_id) {
+            tracing::warn!("cannot set the cable's rate for {provider}: {e}");
+            // Apple Music on a cable at another rate than its device would
+            // have every track resampled: it stays where it is. Spotify's
+            // capture warns about the cable's rate itself.
+            if provider.fixed_rate().is_none() {
+                let _ = events.send(RecorderEvent::Error(Problem::new(
+                    ProblemKind::CableRouting,
+                    e,
+                )));
+                return None;
+            }
         }
         // Already on the cable: left there by a session that did not end
         // cleanly. The default device is the safe way back.
@@ -312,19 +318,20 @@ impl CableRoute {
     }
 }
 
-/// The rate the cable is set to for `provider`: its own (44.1 kHz for
-/// Spotify; VB-Cable installs at 48 kHz), else the rate of the device the
-/// app plays on now (`pid`'s). Apple Music keeps the stream it opened there
-/// when it moves to the cable, at that device's rate: a cable at another
-/// rate would resample every track (measured November 24, 2026). `None`
-/// when that device cannot be read.
-fn cable_rate(provider: Provider, pid: u32) -> Option<u32> {
-    provider.fixed_rate().or_else(|| {
-        audio_setup::spotify_output_device(pid)
-            .inspect_err(|e| tracing::warn!("cannot read {provider}'s output device: {e}"))
-            .ok()
-            .map(|device| device.sample_rate)
-    })
+/// Sets the cable to `provider`'s rate: its own (44.1 kHz for Spotify;
+/// VB-Cable installs at 48 kHz), else the rate of the device the app plays
+/// on now (`pid`'s). Apple Music keeps the stream it opened there when it
+/// moves to the cable, at that device's rate: a cable at another rate would
+/// resample every track (measured November 24, 2026).
+fn align_cable_rate(provider: Provider, pid: u32, cable_id: &str) -> Result<()> {
+    let rate = match provider.fixed_rate() {
+        Some(rate) => rate,
+        None => audio_setup::spotify_output_device(pid)?.sample_rate,
+    };
+    if audio_setup::output_device(cable_id)?.sample_rate != rate {
+        device_config::set_sample_rate(cable_id, rate)?;
+    }
+    Ok(())
 }
 
 /// Gives the app its device back, however the session ends. Windows keeps
@@ -883,6 +890,14 @@ fn encode(
         .with_extension(format!("out.{}", format.extension()));
     let source_bits = fidelity.lossless_depth();
     let channels = output_channels(fidelity, format, job.layout, kept);
+    // Labelled with the channels the file holds: 2 for a surround track
+    // mixed down to stereo in MP3.
+    let fidelity = match fidelity {
+        Fidelity::Surround { .. } => Fidelity::Surround {
+            channels: channels.count(),
+        },
+        fidelity => fidelity,
+    };
     match format {
         OutputFormat::Flac { depth } => {
             let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
