@@ -18,8 +18,8 @@ const SCALE_24: f32 = 8_388_608.0; // 2^23
 pub struct BitAnalysis {
     /// Per frame of the samples fed.
     channels: u16,
-    /// Peak of the channels beyond the front pair.
-    surround_peak: f32,
+    /// Peak of each channel beyond the front pair.
+    other_peaks: Vec<f32>,
     samples: u64,
     not_16_bit: u64,
     not_24_bit: u64,
@@ -134,7 +134,7 @@ impl BitAnalysis {
         debug_assert!(channels >= 2);
         Self {
             channels,
-            surround_peak: 0.0,
+            other_peaks: vec![0.0; usize::from(channels.saturating_sub(2))],
             samples: 0,
             not_16_bit: 0,
             not_24_bit: 0,
@@ -157,8 +157,8 @@ impl BitAnalysis {
         let mut front = Vec::with_capacity(samples.len() / channels * 2);
         for frame in samples.chunks_exact(channels) {
             front.extend_from_slice(&frame[..2]);
-            for sample in &frame[2..] {
-                self.surround_peak = self.surround_peak.max(sample.abs());
+            for (peak, sample) in self.other_peaks.iter_mut().zip(&frame[2..]) {
+                *peak = peak.max(sample.abs());
             }
         }
         self.feed_stereo(&front);
@@ -209,14 +209,24 @@ impl BitAnalysis {
     }
 
     /// Peak of the channels beyond the front pair; 0 for stereo.
-    pub const fn surround_peak(&self) -> f32 {
-        self.surround_peak
+    pub fn surround_peak(&self) -> f32 {
+        self.other_peaks.iter().copied().fold(0.0, f32::max)
     }
 
     /// The channels beyond the front pair carry sound: the track is a
-    /// multichannel one, written with all of them.
+    /// multichannel one, written with those that do
+    /// ([`Self::sounding`]).
     pub fn is_surround(&self) -> bool {
-        self.surround_peak > 0.0
+        self.surround_peak() > 0.0
+    }
+
+    /// Per channel, whether it carried any sound; the front pair always
+    /// counts as sounding.
+    pub fn sounding(&self) -> Vec<bool> {
+        [true, true]
+            .into_iter()
+            .chain(self.other_peaks.iter().map(|&peak| peak > 0.0))
+            .collect()
     }
 
     /// Front-pair samples analysed.

@@ -180,6 +180,50 @@ impl ChannelLayout {
         )
     }
 
+    /// The speakers of `self`, one per channel in order.
+    fn speakers(self) -> impl Iterator<Item = u32> {
+        (0..32)
+            .map(|bit| 1_u32 << bit)
+            .filter(move |bit| self.mask & bit != 0)
+    }
+
+    /// The channels that carry sound (`sounding`, one per channel), when
+    /// they make a layout FLAC names on its own: a 5.1 render placed in a
+    /// 7.1 capture (its side pair silent all along) is written as 5.1. The
+    /// front pair always stays; any other subset keeps `self` whole, silent
+    /// channels included.
+    pub fn keeping(self, sounding: &[bool]) -> Self {
+        let speakers: Vec<u32> = self.speakers().collect();
+        if speakers.len() != usize::from(self.channels) || sounding.len() != speakers.len() {
+            return self;
+        }
+        const FRONT: u32 = speaker::FRONT_LEFT | speaker::FRONT_RIGHT;
+        let mask = speakers
+            .iter()
+            .zip(sounding)
+            .filter(|&(&speaker, &on)| on || speaker & FRONT != 0)
+            .fold(0, |mask, (&speaker, _)| mask | speaker);
+        let kept = Self {
+            channels: mask.count_ones() as u16,
+            mask,
+        };
+        if kept.is_standard_surround() {
+            kept
+        } else {
+            self
+        }
+    }
+
+    /// Where each channel of `kept` (a subset of `self`) sits in a frame of
+    /// `self`.
+    pub fn positions(self, kept: Self) -> Vec<usize> {
+        self.speakers()
+            .enumerate()
+            .filter(|&(_, speaker)| kept.mask & speaker != 0)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     /// Left and right gains of each channel for a stereo downmix: the front
     /// pair as is, centre and surrounds at -3 dB (ITU-R BS.775), the LFE
     /// left out. Scaled so that no output can exceed full scale (as
@@ -328,6 +372,55 @@ mod tests {
             mask: 0x60f,
         };
         assert!(side.is_standard_surround());
+    }
+
+    #[test]
+    fn keeps_only_the_channels_with_sound_when_flac_names_them() {
+        let all = [true; 8];
+        // FL FR FC LFE BL BR SL SR, the side pair silent: 5.1 (back).
+        let side_silent = [true, true, true, true, true, true, false, false];
+        let five_one = ChannelLayout::SURROUND_7_1.keeping(&side_silent);
+        assert_eq!(
+            five_one,
+            ChannelLayout {
+                channels: 6,
+                mask: 0x3f
+            }
+        );
+        assert_eq!(
+            ChannelLayout::SURROUND_7_1.positions(five_one),
+            [0, 1, 2, 3, 4, 5]
+        );
+        // The back pair silent: 5.1 (side).
+        let back_silent = [true, true, true, true, false, false, true, true];
+        let side = ChannelLayout::SURROUND_7_1.keeping(&back_silent);
+        assert_eq!(side.mask, 0x60f);
+        assert_eq!(
+            ChannelLayout::SURROUND_7_1.positions(side),
+            [0, 1, 2, 3, 6, 7]
+        );
+        // Every channel used, or a silent LFE (7.0 is not a FLAC layout):
+        // kept whole.
+        assert_eq!(
+            ChannelLayout::SURROUND_7_1.keeping(&all),
+            ChannelLayout::SURROUND_7_1
+        );
+        let no_lfe = [true, true, true, false, true, true, true, true];
+        assert_eq!(
+            ChannelLayout::SURROUND_7_1.keeping(&no_lfe),
+            ChannelLayout::SURROUND_7_1
+        );
+        // A silent front pair is still the front pair.
+        let front_silent = [false, false, true, true, true, true, false, false];
+        assert_eq!(
+            ChannelLayout::SURROUND_7_1.keeping(&front_silent).mask,
+            0x3f
+        );
+        // Stereo stays stereo.
+        assert_eq!(
+            ChannelLayout::STEREO.keeping(&[true, false]),
+            ChannelLayout::STEREO
+        );
     }
 
     #[test]

@@ -35,6 +35,11 @@ pub struct TrackTags {
     pub cover: Option<Cover>,
     /// The catalogue the details come from, when not only Spotify.
     pub source: Option<&'static str>,
+    /// Of a surround FLAC: its `WAVEFORMATEXTENSIBLE` speaker mask, written
+    /// as RFC 9639's `WAVEFORMATEXTENSIBLE_CHANNEL_MASK` comment so that a
+    /// layout other than FLAC's default for the count (5.1 with its side
+    /// pair, `0x60F`) is read right.
+    pub channel_mask: Option<u32>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -171,6 +176,10 @@ impl TrackTags {
         put("TRACKNUMBER", &self.track_number.map(|n| n.to_string()));
         put("TRACKTOTAL", &self.track_total.map(|n| n.to_string()));
         put("DISCNUMBER", &self.disc_number.map(|n| n.to_string()));
+        put(
+            "WAVEFORMATEXTENSIBLE_CHANNEL_MASK",
+            &self.channel_mask.map(|mask| format!("0x{mask:X}")),
+        );
         for genre in &self.genres {
             tag.push("GENRE".to_owned(), genre.clone());
         }
@@ -309,6 +318,19 @@ mod tests {
         assert_eq!(
             TrackTags::cover_url(&track, Some(&album)).as_deref(),
             Some("u")
+        );
+    }
+
+    #[test]
+    fn names_the_speakers_of_a_surround_flac() {
+        let mut tags = TrackTags::from_spotify(&spotify_track());
+        let comments = tags.to_vorbis_comments();
+        assert_eq!(comments.get("WAVEFORMATEXTENSIBLE_CHANNEL_MASK"), None);
+        tags.channel_mask = Some(0x60f);
+        let comments = tags.to_vorbis_comments();
+        assert_eq!(
+            comments.get("WAVEFORMATEXTENSIBLE_CHANNEL_MASK"),
+            Some("0x60F")
         );
     }
 

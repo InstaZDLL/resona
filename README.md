@@ -100,7 +100,7 @@
 
 - **How the check works**: an untouched lossless stream is made of exact 16- or 24-bit values, so any gain, resampling or effect shows on every sample. A track is *bit-perfect* when it is that exact stream, give or take the few hundred samples Spotify itself softens around a pause (at most 1 in 10,000).
 - **Before recording**, Resona warns about anything that would alter the sound: Spotify's volume below 100 % (one click sets it back), normalization, Automix, a quality other than Lossless, Windows audio enhancements, an output device not at 44.1 kHz.
-- **Virtual cable mode** (optional, [VB-Cable](https://vb-audio.com/Cable/)): the app plays silently into the cable, which Resona sets up by itself (at 44.1 kHz for Spotify). Your headset's settings stop mattering, you can listen to something else — or have Resona play the recording back to you.
+- **Virtual cable mode** (optional, [VB-Cable](https://vb-audio.com/Cable/)): the app plays silently into the cable, which Resona sets up by itself (at 44.1 kHz for Spotify; for Apple Music, at the rate of the device it was playing on). Your headset's settings stop mattering, you can listen to something else — or have Resona play the recording back to you.
 - If the app adds a crossfade at a track change, Resona notices and tells you how to turn it off.
 
 ### ✨ And also
@@ -175,7 +175,7 @@ Or turn on **Settings → Audio → Play Spotify through a virtual cable**: the 
 | Apple Music | **Volume at maximum** |
 | Apple Music | Sound Check, Sound Enhancer, **Crossfade** and **Dolby Atmos**: **off** |
 | Windows | Audio enhancements **off**, and any headset software equalizer (G HUB's *Advanced EQ*…) **off** |
-| Windows | Output device (or cable) format at **the track's rate**: 44,100 or 48,000 Hz, shown in Apple Music's *Lossless* badge |
+| Windows | Output device format at **the track's rate**: 44,100 or 48,000 Hz, shown in Apple Music's *Lossless* badge (the cable takes that device's rate) |
 
 Apple Music does not change the device's rate by itself, and its catalogue mixes 44.1 and 48 kHz: a track at another rate than the device is still recorded, but labelled *altered*. Hi-Res Lossless (up to 192 kHz) has not been tested yet.
 

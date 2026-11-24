@@ -25,8 +25,8 @@ pub fn encode_wav_to_flac(
     channels: Channels,
 ) -> Result<()> {
     debug_assert!(quantizer.bits() == 16 || quantizer.bits() == 24);
-    if let Channels::All(layout) = channels {
-        debug_assert!(layout.is_stereo() || layout.is_standard_surround());
+    if let Channels::Surround { kept, .. } = channels {
+        debug_assert!(kept.is_stereo() || kept.is_standard_surround());
     }
     let mut reader = WavReader::open(src)?;
     let source = reader.spec();
@@ -190,7 +190,7 @@ mod tests {
             &wav_path,
             &flac_path,
             Quantizer::new(24, 24),
-            Channels::All(layout),
+            Channels::all(layout),
         )
         .unwrap();
         let mut reader = claxon::FlacReader::open(&flac_path).unwrap();

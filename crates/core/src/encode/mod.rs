@@ -17,18 +17,31 @@ pub enum Channels {
     /// Front left / right: a stereo track, whatever the capture's layout
     /// (on a surround cable, a stereo track leaves the others silent).
     FrontPair,
-    /// Every channel, in the capture's layout: a surround track
-    /// ([`crate::analysis::Fidelity::Surround`]) in FLAC or WAV.
-    All(ChannelLayout),
+    /// The channels of a surround track ([`crate::analysis::Fidelity::Surround`])
+    /// that carry sound, in FLAC or WAV: `kept` is `source` (the capture's
+    /// layout) or the part of it a standard layout makes
+    /// ([`ChannelLayout::keeping`]).
+    Surround {
+        source: ChannelLayout,
+        kept: ChannelLayout,
+    },
     /// A stereo downmix of every channel: a surround track in MP3.
     Downmix(ChannelLayout),
 }
 
 impl Channels {
+    /// Every channel of `layout`, as captured.
+    pub fn all(layout: ChannelLayout) -> Self {
+        Self::Surround {
+            source: layout,
+            kept: layout,
+        }
+    }
+
     /// Channels per frame of the output.
     pub fn count(self) -> u16 {
         match self {
-            Self::All(layout) => layout.channels,
+            Self::Surround { kept, .. } => kept.channels,
             Self::FrontPair | Self::Downmix(_) => ChannelLayout::STEREO.channels,
         }
     }
@@ -42,6 +55,9 @@ pub(crate) struct Remix<I> {
     channels: Channels,
     /// Of [`Channels::Downmix`], computed once.
     gains: Vec<(f32, f32)>,
+    /// Of [`Channels::Surround`]: where each kept channel sits in a source
+    /// frame.
+    positions: Vec<usize>,
     frame: Vec<f32>,
     out: Vec<f32>,
     next: usize,
@@ -52,8 +68,13 @@ impl<I: Iterator<Item = hound::Result<f32>>> Remix<I> {
         let source = usize::from(source);
         let fits = match channels {
             Channels::FrontPair => source >= 2,
-            Channels::All(layout) | Channels::Downmix(layout) => {
+            Channels::Downmix(layout) => usize::from(layout.channels) == source,
+            Channels::Surround {
+                source: layout,
+                kept,
+            } => {
                 usize::from(layout.channels) == source
+                    && layout.positions(kept).len() == usize::from(kept.channels)
             }
         };
         if !fits {
@@ -67,6 +88,10 @@ impl<I: Iterator<Item = hound::Result<f32>>> Remix<I> {
             channels,
             gains: match channels {
                 Channels::Downmix(layout) => layout.downmix_gains(),
+                _ => Vec::new(),
+            },
+            positions: match channels {
+                Channels::Surround { source, kept } => source.positions(kept),
                 _ => Vec::new(),
             },
             frame: Vec::with_capacity(source),
@@ -90,7 +115,10 @@ impl<I: Iterator<Item = hound::Result<f32>>> Remix<I> {
         self.out.clear();
         match self.channels {
             Channels::FrontPair => self.out.extend_from_slice(&self.frame[..2]),
-            Channels::All(_) => self.out.extend_from_slice(&self.frame),
+            Channels::Surround { .. } => {
+                let frame = &self.frame;
+                self.out.extend(self.positions.iter().map(|&i| frame[i]));
+            }
             Channels::Downmix(_) => self
                 .out
                 .extend_from_slice(&downmix_frame(&self.frame, &self.gains)),
@@ -183,7 +211,19 @@ mod tests {
             remix(&frames, 8, Channels::FrontPair).unwrap(),
             [0.1, 0.2, -0.1, -0.2]
         );
-        assert_eq!(remix(&frames, 8, Channels::All(layout)).unwrap(), frames);
+        assert_eq!(remix(&frames, 8, Channels::all(layout)).unwrap(), frames);
+        // The side pair dropped: 5.1 out of a 7.1 capture.
+        let five_one = Channels::Surround {
+            source: layout,
+            kept: ChannelLayout {
+                channels: 6,
+                mask: 0x3f,
+            },
+        };
+        assert_eq!(
+            remix(&frames, 8, five_one).unwrap(),
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -0.1, -0.2, 0.0, 0.0, 0.0, 0.0]
+        );
         assert_eq!(
             remix(&frames, 8, Channels::Downmix(layout)).unwrap().len(),
             4
@@ -192,8 +232,8 @@ mod tests {
             remix(&[0.5, -0.5], 2, Channels::FrontPair).unwrap(),
             [0.5, -0.5]
         );
-        assert!(remix(&frames[..7], 8, Channels::All(layout)).is_err());
-        assert!(remix(&frames, 2, Channels::All(layout)).is_err());
+        assert!(remix(&frames[..7], 8, Channels::all(layout)).is_err());
+        assert!(remix(&frames, 2, Channels::all(layout)).is_err());
     }
 
     #[test]

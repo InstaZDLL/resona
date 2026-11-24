@@ -263,7 +263,7 @@ struct CableRoute {
 }
 
 impl CableRoute {
-    /// Sets the cable up (44.1 kHz for Spotify) and sends `provider`'s
+    /// Sets the cable's rate (see [`align_cable_rate`]) and sends `provider`'s
     /// sound (its [`AppProcesses::audio_root`] `pid`) to it. `None`, with an
     /// event saying why, when that fails.
     fn enter(provider: Provider, pid: u32, events: &Sender<RecorderEvent>) -> Option<Self> {
@@ -281,20 +281,25 @@ impl CableRoute {
         if let Ok(Some(default)) = audio_setup::cable_as_default() {
             let _ = events.send(RecorderEvent::CableIsDefault(default));
         }
-        // VB-Cable installs at 48 kHz: Spotify would be resampled on its
-        // way in. If this fails, the capture's setup warning says so.
-        // Apple Music has no single rate: the cable stays at the rate the
-        // user gave it, like a headset.
-        if let Some(rate) = provider.fixed_rate()
-            && audio_setup::output_device(&cable_id).is_ok_and(|d| d.sample_rate != rate)
-            && let Err(e) = device_config::set_sample_rate(&cable_id, rate)
-        {
-            tracing::warn!("cannot set the cable to {rate} Hz: {e}");
-        }
         let current = routing::spotify_endpoint(pid).unwrap_or_else(|e| {
             tracing::warn!("cannot read {provider}'s output device: {e}");
             None
         });
+        // Set before the app is sent there: a rate changed under a playing
+        // stream silences Apple Music until it is restarted.
+        if let Err(e) = align_cable_rate(provider, pid, &cable_id) {
+            tracing::warn!("cannot set the cable's rate for {provider}: {e}");
+            // Apple Music on a cable at another rate than its device would
+            // have every track resampled: it stays where it is. Spotify's
+            // capture warns about the cable's rate itself.
+            if provider.fixed_rate().is_none() {
+                let _ = events.send(RecorderEvent::Error(Problem::new(
+                    ProblemKind::CableRouting,
+                    e,
+                )));
+                return None;
+            }
+        }
         // Already on the cable: left there by a session that did not end
         // cleanly. The default device is the safe way back.
         let previous = current.filter(|id| *id != cable_id);
@@ -311,6 +316,22 @@ impl CableRoute {
             previous,
         })
     }
+}
+
+/// Sets the cable to `provider`'s rate: its own (44.1 kHz for Spotify;
+/// VB-Cable installs at 48 kHz), else the rate of the device the app plays
+/// on now (`pid`'s). Apple Music keeps the stream it opened there when it
+/// moves to the cable, at that device's rate: a cable at another rate would
+/// resample every track (measured November 24, 2026).
+fn align_cable_rate(provider: Provider, pid: u32, cable_id: &str) -> Result<()> {
+    let rate = match provider.fixed_rate() {
+        Some(rate) => rate,
+        None => audio_setup::spotify_output_device(pid)?.sample_rate,
+    };
+    if audio_setup::output_device(cable_id)?.sample_rate != rate {
+        device_config::set_sample_rate(cable_id, rate)?;
+    }
+    Ok(())
 }
 
 /// Gives the app its device back, however the session ends. Windows keeps
@@ -835,7 +856,15 @@ fn encode(
 ) -> Result<RecorderEvent> {
     let title = job.ended.track.title.clone();
     let duration = job.ended.duration(job.sample_rate);
-    let fidelity = job.analysis.fidelity();
+    // A surround track is written, and labelled, with the channels that
+    // carried sound when they make a standard layout.
+    let kept = job.layout.keeping(&job.analysis.sounding());
+    let fidelity = match job.analysis.fidelity() {
+        Fidelity::Surround { .. } => Fidelity::Surround {
+            channels: kept.channels,
+        },
+        fidelity => fidelity,
+    };
     let discard = if duration < config.min_duration {
         Some(DiscardReason::TooShort)
     } else if !config.keep_partial && job.ended.is_partial(job.sample_rate, PARTIAL_TOLERANCE) {
@@ -860,7 +889,15 @@ fn encode(
         .wav
         .with_extension(format!("out.{}", format.extension()));
     let source_bits = fidelity.lossless_depth();
-    let channels = output_channels(fidelity, format, job.layout);
+    let channels = output_channels(fidelity, format, job.layout, kept);
+    // Labelled with the channels the file holds: 2 for a surround track
+    // mixed down to stereo in MP3.
+    let fidelity = match fidelity {
+        Fidelity::Surround { .. } => Fidelity::Surround {
+            channels: channels.count(),
+        },
+        fidelity => fidelity,
+    };
     match format {
         OutputFormat::Flac { depth } => {
             let quantizer = Quantizer::new(depth.resolve(source_bits), source_bits);
@@ -872,12 +909,17 @@ fn encode(
         }
         OutputFormat::Mp3 { kbps } => mp3::encode_wav_to_mp3(&job.wav, &staged, kbps, channels)?,
     }
-    let (tags, mut outcome) = metadata::tags_for(
+    let (mut tags, mut outcome) = metadata::tags_for(
         catalogues.deezer.as_ref(),
         catalogues.spotify.as_ref(),
         &job.ended.track,
         job.uri.as_deref(),
     );
+    // FLAC has no mask of its own: the speakers of the channels kept are
+    // named in a comment (the WAV output has them in its header).
+    if let Channels::Surround { kept, .. } = channels {
+        tags.channel_mask = Some(kept.mask);
+    }
     // Best effort: the audio is the recording, and once moved into the
     // folder it must not be reported as failed for want of tags.
     if let Err(e) = tags.write(&staged, format) {
@@ -950,13 +992,22 @@ fn encode(
     })
 }
 
-/// The channels a track is written with: all of a surround one (a stereo
-/// downmix in MP3), the front pair of any other, whatever the capture
-/// held (a stereo track on a 7.1 cable leaves the others silent).
-fn output_channels(fidelity: Fidelity, format: OutputFormat, layout: ChannelLayout) -> Channels {
+/// The channels a track is written with: those of a surround one that
+/// carried sound (`kept`; a stereo downmix in MP3), the front pair of any
+/// other, whatever the capture held (a stereo track on a 7.1 cable leaves
+/// the others silent).
+fn output_channels(
+    fidelity: Fidelity,
+    format: OutputFormat,
+    layout: ChannelLayout,
+    kept: ChannelLayout,
+) -> Channels {
     match (fidelity, format) {
         (Fidelity::Surround { .. }, OutputFormat::Mp3 { .. }) => Channels::Downmix(layout),
-        (Fidelity::Surround { .. }, _) => Channels::All(layout),
+        (Fidelity::Surround { .. }, _) => Channels::Surround {
+            source: layout,
+            kept,
+        },
         _ => Channels::FrontPair,
     }
 }
