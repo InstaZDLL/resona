@@ -426,25 +426,34 @@ fn show_provider(window: &AppWindow, provider: Provider) {
     window.set_spotify_state(SpotifyState::NotRunning);
     window.set_has_cover(false);
     show_now_playing(window, None, None);
-    // Spotify's settings warnings do not apply to another app.
     let notices = window.get_notices();
     if let Some(notices) = notices.as_any().downcast_ref::<VecModel<Notice>>() {
-        let kept: Vec<Notice> = notices
-            .iter()
-            .filter(|n| {
-                !matches!(
-                    n.kind,
-                    Warning::SpotifyNormalize
-                        | Warning::SpotifyFades
-                        | Warning::Processed
-                        | Warning::SpotifyAutomix
-                        | Warning::SpotifyNotLossless
-                        | Warning::SpotifyVolume
-                        | Warning::SampleRate
-                )
-            })
-            .collect();
+        let kept: Vec<Notice> = notices.iter().filter(|n| !tied_to_player(n)).collect();
         notices.set_vec(kept);
+    }
+}
+
+/// A notice that does not outlive a change of app: Spotify's settings
+/// warnings, and the ones worded with the app's name, which the window
+/// takes from the current selection and would pin on the new app.
+fn tied_to_player(notice: &Notice) -> bool {
+    match notice.kind {
+        Warning::SpotifyNormalize
+        | Warning::SpotifyFades
+        | Warning::Processed
+        | Warning::SpotifyAutomix
+        | Warning::SpotifyNotLossless
+        | Warning::SpotifyVolume
+        | Warning::SampleRate
+        | Warning::CableMissing => true,
+        Warning::Error => matches!(
+            notice.problem,
+            Failure::SpotifyNotRunning
+                | Failure::CaptureNotStarted
+                | Failure::CableRouting
+                | Failure::HeadsetPlayback
+        ),
+        _ => false,
     }
 }
 
@@ -1194,6 +1203,26 @@ fn error_notice(problem: &Problem) -> Notice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_naming_the_app_do_not_outlive_a_change_of_app() {
+        let error = |problem| Notice {
+            kind: Warning::Error,
+            problem,
+            ..Default::default()
+        };
+        assert!(tied_to_player(&error(Failure::SpotifyNotRunning)));
+        assert!(tied_to_player(&error(Failure::CaptureNotStarted)));
+        assert!(!tied_to_player(&error(Failure::Encoding)));
+        assert!(!tied_to_player(&error(Failure::LostSpotify)));
+        let notice = |kind| Notice {
+            kind,
+            ..Default::default()
+        };
+        assert!(tied_to_player(&notice(Warning::Processed)));
+        assert!(tied_to_player(&notice(Warning::CableMissing)));
+        assert!(!tied_to_player(&notice(Warning::Update)));
+    }
 
     fn title(name: &str) -> TrackTitle {
         TrackTitle {
