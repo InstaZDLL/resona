@@ -18,11 +18,24 @@ pub fn capture_spec(sample_rate: u32, channels: u16) -> WavSpec {
     }
 }
 
+/// Bytes of samples an intermediate WAV may hold. A WAV counts its sizes
+/// on 32 bits (the RIFF size is the data's plus the header's), and hound's
+/// counter would wrap past it, leaving a header that does not match the
+/// samples: kept a little below, for the header.
+const MAX_DATA_BYTES: u64 = u32::MAX as u64 - 4096;
+
+/// `samples` more 32-bit samples still fit after `data_bytes`.
+fn fits(data_bytes: u64, samples: usize) -> bool {
+    data_bytes + 4 * samples as u64 <= MAX_DATA_BYTES
+}
+
 /// Intermediate 32-bit float WAV a track is captured into.
 pub struct CaptureWav {
     writer: WavWriter<BufWriter<File>>,
     path: PathBuf,
     layout: ChannelLayout,
+    /// Of samples written so far.
+    data_bytes: u64,
 }
 
 impl CaptureWav {
@@ -38,13 +51,21 @@ impl CaptureWav {
             writer: WavWriter::create(path, capture_spec(sample_rate, layout.channels))?,
             path: path.to_path_buf(),
             layout,
+            data_bytes: 0,
         })
     }
 
+    /// Refuses, before writing any of them, samples that would take the
+    /// file past what a WAV can hold (about 3 h 20 min of stereo at
+    /// 44.1 kHz, 46 min of 7.1 at 48 kHz).
     pub fn write(&mut self, samples: &[f32]) -> Result<()> {
+        if !fits(self.data_bytes, samples.len()) {
+            return Err(Error::WavFull);
+        }
         for &sample in samples {
             self.writer.write_sample(sample)?;
         }
+        self.data_bytes += 4 * samples.len() as u64;
         Ok(())
     }
 
@@ -131,6 +152,15 @@ mod tests {
         let read: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(read, values.map(|v| v as i16));
+    }
+
+    #[test]
+    fn refuses_samples_past_what_a_wav_holds() {
+        assert!(fits(0, 1024));
+        assert!(fits(MAX_DATA_BYTES - 8, 2));
+        assert!(!fits(MAX_DATA_BYTES - 8, 3));
+        // Whatever hound has counted, its 32-bit counter never wraps.
+        assert!(MAX_DATA_BYTES + 4096 <= u64::from(u32::MAX));
     }
 
     /// `dwChannelMask` of a WAV file hound wrote.
