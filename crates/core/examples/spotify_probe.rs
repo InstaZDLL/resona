@@ -1,15 +1,17 @@
 //! Phase 1 diagnostic: prints what the monitor sees (window title, SMTC
 //! session) and the status it derives, every time something changes.
-//! Use it to check how Spotify behaves on ads, pauses and track changes.
+//! Use it to check how Spotify behaves on ads, pauses and track changes,
+//! or Apple Music with `apple` as second argument.
 //!
 //! ```text
-//! cargo run -p resona-core --example spotify_probe -- [seconds]
+//! cargo run -p resona-core --example spotify_probe -- [seconds] [apple]
 //! ```
 
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use std::time::{Duration, Instant};
 
+    use resona_core::provider::Provider;
     use resona_core::spotify::monitor::{POLL_INTERVAL, Poller, status_of};
     use resona_core::spotify::state::Content;
 
@@ -21,7 +23,11 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or(120);
     let _ = wasapi::initialize_mta();
 
-    let mut poller = Poller::new();
+    let provider = match std::env::args().nth(2).as_deref() {
+        Some("apple") => Provider::AppleMusic,
+        _ => Provider::Spotify,
+    };
+    let mut poller = Poller::new(provider);
     let mut last = None;
     let mut content = Content::Nothing;
     let deadline = Instant::now() + Duration::from_secs(seconds);

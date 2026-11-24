@@ -281,6 +281,46 @@ For the app itself to check (phase 5):
 
 Interface choice: the Spotify quality (`format::SpotifyQuality`) is a setting. *Lossless* defaults to FLAC Auto, *Premium* to MP3 320, *Free* to MP3 160. Ads only exist in Free: the ad logic does not apply to the other two.
 
+## Apple Music (spike, November 23, 2026)
+
+Goal: record the Apple Music app for Windows as well (MSIX `AppleInc.AppleMusicWin`, version 1.1792.39942.0, AUMID `AppleInc.AppleMusicWin_nzyj5cx40ttqa!App`). Measured with `examples/apple_music_probe.rs`, against the real app with an Apple Music subscription.
+
+Measured:
+
+- **The sound is not rendered by `AppleMusic.exe`.** It comes from `AMPLibraryAgent.exe`, an out-of-process COM server started by `svchost` (`-Embedding`), outside `AppleMusic.exe`'s tree. A process-loopback capture of `AppleMusic.exe` gets a steady stream of pure silence; one of `AMPLibraryAgent.exe` gets the music. FairPlay does not block the capture: the decoded audio reaches it like any other app's.
+- **Window title is useless.** The visible `WinUIDesktopWin32WindowClass` window is always titled `Apple Music` (briefly `PopupHost` when a popup opens). Detection must be SMTC-first; there are no ads to tell apart.
+- **SMTC session** (`AppleInc.AppleMusicWin_nzyj5cx40ttqa!App`): the title is right and the playback status is reliable (playing / paused). But `artist` holds `Artist — Album` as one string (`Beach Riot — Sub Atomic Party Cool`), `album_artist` holds the same string, `album` is empty and `track_number` is 0. Duration and position are rounded to the second. On a track change, the previous duration stays about 0.5 s next to the new title (as with Spotify).
+- **Bit-transparent capture is possible**: 24-bit exact on a 24-bit / 48 kHz track, with these settings:
+  - Apple Music: *Lossless audio* on **and** *Streaming → Lossless (ALAC up to 24-bit/48 kHz)* (the switch alone keeps AAC 256), volume slider at maximum, Sound Check, crossfade and Sound Enhancer off, Dolby Atmos off;
+  - Windows: **device format at the track's rate**. A 24/48 track on a 44.1 kHz device is resampled (82 % of samples off the grid); at 48 kHz it is exact. The catalog mixes 44.1 and 48 kHz tracks (and up to 192 kHz in Hi-Res), and Apple Music for Windows does not switch the device rate;
+  - no device effect: G HUB's *Advanced EQ* on the Logitech PRO X made loud passages non-transparent (20–47 % of samples off the grid, quiet seconds exact) while Windows showed *Audio enhancements: Off*. The registry flag (`audio_setup::enhancements_active`) did report it.
+
+Consequences for the design:
+
+- Capture target: the provider decides which process renders (`Spotify.exe` root, `AMPLibraryAgent.exe`). The agent may outlive the window and be restarted by COM: find it again on each recording start.
+- Capture rate: `CaptureConfig::sample_rate` must be the device rate for Apple Music, not 44.1 kHz. The engine, splitter, clock and intermediate WAV take it as input; playback (virtual cable, Spotify only) and `analysis::HEAD_SAMPLES` (fade detection, two seconds at 44.1 kHz) still assume 44.1 kHz. The per-track `Fidelity` stays the verdict: a track at another rate than the device is recorded, flagged as not bit-transparent.
+- Metadata: split `Artist — Album` on the first ` — ` (artist names hardly ever hold one, album titles sometimes do), then look up with the existing Deezer matcher (title, artist, duration ± 1 s). The iTunes Search API (`itunes.apple.com/search`, no key) can come later for album, track number and cover art.
+- Track boundaries: SMTC dates a track start only to the second, so cut placement relies more on `recorder::boundary` (silence) than for Spotify.
+- Playlist mode: not for Apple Music at first (no `spotify_cli` equivalent; personal playlists need the Apple Music API with a user token).
+
+Built (branch `feat/apple-music`, November 23, 2026):
+
+- `provider::Provider` (`Spotify`, `AppleMusic`), pure: process names (window owner, audio renderer), window class, SMTC app id, title mode (window title or SMTC), fixed rate, whether SMTC dates a track start, whether Spotify's tools exist. Saved in the settings (`provider = "apple-music"`), chosen in Settings → Recording → *Music app*; the monitor restarts on a change.
+- `spotify::process::AppProcesses` finds the app's processes and the one to capture (`audio_root`); `spotify::state::classify_smtc` names Apple Music's track from SMTC alone; the monitor sends no `TrackStart` for Apple Music (SMTC times in whole seconds), so its cuts come from the title change and the silence between tracks.
+- The engine captures at `Provider::fixed_rate()` or the device's rate, rebuilds the splitter and clock when a new capture comes at another rate, and drops a capture whose process quit (the agent's restart is not reported by the capture).
+- Spotify-only features stay Spotify-only: ad muting, `spotify_cli` catalogue entries, playlist mode (forced to Spotify), the preferences and volume checks.
+- The virtual cable works for both: the library agent is routed to VB-Cable like Spotify (Windows keeps the choice per executable, so a restarted agent stays on it). Spotify's cable is set to 44.1 kHz; Apple Music's keeps its own rate, which must match the tracks like a headset's. Playback to the headset runs at the capture's rate. Measured: routing and capture work (`CABLE Input`, 44.1 kHz); a 24/48 track on the cable at 44.1 kHz came out processed, as expected. The first track kept only 29 s of the 68 s: Apple Music was paused for its first 39 s, and that silence was dropped as it should be. Moving the agent to the cable and back while capturing loses nothing: a 45 s capture with a move at 5 s and another at 30 s (`RESONA_PROBE_CABLE=1 apple_music_probe`) had sound in every second.
+
+First real session (`record -- <dir> 4 --apple --keep-partial`, device at 48 kHz): two FLAC files at 24-bit / 48 kHz, tags from Deezer, synced lyrics found for one; the cut between the tracks landed on the silence 221 ms after the title estimate. *Tell Me I'm Wrong* (24/48) bit-perfect; *Tune in, Drop Out*, joined mid-track, came out processed — probably a 44.1 kHz track resampled to the device's 48 kHz, not checked.
+
+Dolby Atmos (2026-11-23, *Dolby Atmos: Always On*, Windows spatial sound off), measured with `apple_music_probe` (it prints the peak of the channels beyond front left / right each second; `RESONA_PROBE_DEVICE=<name>` plays the agent on another device for the run):
+
+- On the Logitech PRO X, set up as *7.1 Surround*: nothing beyond the front pair (-inf over 15 s); the front pair peaks around -12 dBFS. Still nothing after running Windows' Speaker Setup on it (7.1 Surround, full-range front pair) and playing a new Atmos track. Apple Music renders Atmos to stereo for it, probably because the endpoint is a headset (its form factor), not because of its channel layout.
+- On VB-Cable's `CABLE Input` set up as *7.1 Surround* (mask `0x63f`, 8 channels; *Configure* is greyed out on `CABLE In 16ch`): the centre, LFE and surround channels carry sound (-15 to -10 dBFS each second, front pair -10 to -7 dBFS). **Apple Music renders Atmos as 7.1 PCM on a speaker layout**: it can be recorded.
+- What it would take: the agent sent to a 7.1 cable (as the cable mode does), and the pipeline carrying 8 channels instead of the front pair — `format::front_stereo`, splitter frames, intermediate WAV, FLAC (8 channels, same order as `WAVEFORMATEXTENSIBLE`: FL FR FC LFE BL BR SL SR), analysis, playback (downmix for the headset). MP3 stays stereo. Atmos is lossy (Dolby Digital Plus JOC): a faithful capture of the render, never bit-perfect; the objects themselves are not reachable.
+
+Not measured yet: Hi-Res tracks (88.2–192 kHz), downloaded tracks, gapless albums (track boundaries without silence), the agent restarted mid-session, a track skipped or paused while recording, the settings window.
+
 ## Spotify Web API
 
 The C# version (`API/SpotifyAPI.cs`) uses it for two things:

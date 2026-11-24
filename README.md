@@ -6,7 +6,7 @@
 <h1 align="center">Resona</h1>
 
 <p align="center">
-  <strong>Record Spotify on Windows, one tagged file per track — and see which ones came out bit-perfect.</strong>
+  <strong>Record Spotify and Apple Music on Windows, one tagged file per track — and see which ones came out bit-perfect.</strong>
 </p>
 
 <p align="center">
@@ -15,17 +15,17 @@
   <a href="https://github.com/InstaZDLL/resona/actions/workflows/audit.yml"><img src="https://github.com/InstaZDLL/resona/actions/workflows/audit.yml/badge.svg?branch=main" alt="Audit" /></a>
   <img src="https://img.shields.io/badge/version-0.4.1-2563eb?style=flat-square" alt="Version 0.4.1" />
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11" />
-  <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit%20%2F%2044.1%20kHz-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit / 44.1 kHz" />
+  <img src="https://img.shields.io/badge/lossless-FLAC%2024--bit-22c3f5?style=flat-square" alt="Lossless FLAC up to 24-bit" />
   <img src="https://img.shields.io/badge/rust-1.98-orange?style=flat-square&logo=rust" alt="Rust 1.98" />
   <img src="https://img.shields.io/badge/UI-Slint%201.18-2379F4?style=flat-square" alt="Slint 1.18" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT license" />
 </p>
 
 <p align="center">
-  Resona listens to the Spotify desktop app — and only to it — cuts the stream at every
-  track change and saves each song as FLAC, WAV or MP3 with its album, cover, track number and
-  lyrics. With Spotify Premium in <b>Lossless</b>, it checks every single sample and tells you
-  whether the file is an exact copy of what Spotify decoded.
+  Resona listens to the Spotify or Apple Music desktop app — and only to it — cuts the stream
+  at every track change and saves each song as FLAC, WAV or MP3 with its album, cover, track
+  number and lyrics. With either app in <b>Lossless</b>, it checks every single sample and tells
+  you whether the file is an exact copy of what the app decoded.
 </p>
 
 <p align="center">
@@ -53,15 +53,15 @@
 <table>
   <tr>
     <td>🎯&nbsp;<b>Proven lossless</b></td>
-    <td>Resona checks every sample and tells you whether the recording is bit-perfect, processed by Spotify, or altered somewhere in the audio chain.</td>
+    <td>Resona checks every sample and tells you whether the recording is bit-perfect, processed by the app, or altered somewhere in the audio chain.</td>
   </tr>
   <tr>
-    <td>🔇&nbsp;<b>Only Spotify's sound</b></td>
+    <td>🔇&nbsp;<b>Only the music app's sound</b></td>
     <td>Per-process capture: notifications, videos and other apps never end up in your files.</td>
   </tr>
   <tr>
     <td>📋&nbsp;<b>Paste a playlist, walk away</b></td>
-    <td>Private playlists and albums included. Resona starts them in Spotify, records every track and pauses Spotify at the end.</td>
+    <td>Private playlists and albums included. Resona starts them in Spotify, records every track and pauses Spotify at the end (Spotify only).</td>
   </tr>
   <tr>
     <td>🏷️&nbsp;<b>Files you don't have to fix</b></td>
@@ -73,14 +73,16 @@
 
 ### 🎙️ Recording
 
-- **Spotify's audio only** — WASAPI per-process loopback on the Spotify process tree.
+- **Spotify or Apple Music**, chosen in **Settings → Recording → Music app**.
+- **The app's audio only** — WASAPI per-process loopback on the process that plays the sound (for Apple Music, its library agent `AMPLibraryAgent.exe`).
 - **One file per track**, cut on the silence between songs. Each file keeps the track's own leading and trailing silence, so it has the catalogue length and synced lyrics stay on time.
 - **FLAC, WAV or MP3** — FLAC and WAV keep the depth of the source (16 or 24-bit), MP3 from 128 to 320 kbps.
-- **A quality badge on every track** — *bit-perfect 16/24-bit*, *peaks limited by Spotify*, *slightly changed by Spotify* or *altered*, from an analysis of every sample.
+- **A quality badge on every track** — *bit-perfect 16/24-bit*, *peaks limited by Spotify*, *slightly changed by Spotify* (or by Apple Music) or *altered*, from an analysis of every sample.
+- **At the source's rate** — 44.1 kHz for Spotify; Apple Music's tracks (44.1 or 48 kHz) are recorded at the output device's rate, never resampled by Resona.
 - **Incomplete tracks** (joined late, skipped) and very short ones are left out, unless you want them.
 - **Ads** (Spotify Free) are left out of your saved tracks and can be muted (not yet tested with a Free account).
 
-### 📋 Playlist mode
+### 📋 Playlist mode (Spotify)
 
 - **Paste a link** to a playlist (private ones too), an album, a track or your **Liked Songs** (`https://open.spotify.com/collection/tracks`). Copy a link and switch to Resona: it fills the field by itself (the clipboard is read only while Resona is in the foreground).
 - Resona turns shuffle and repeat off, keeps Spotify's volume at 100 % on every track, plays the list from the start and **pauses Spotify when it is over** — no autoplay track sneaks in.
@@ -89,8 +91,8 @@
 
 ### 🏷️ Tags, covers and lyrics
 
-- **Spotify's catalogue first**: the exact release that played (single, album or compilation), its album artists, track number, release date, copyright, tempo (BPM), musical key and a 640 × 640 cover.
-- **Deezer** completes genre, ISRC and label.
+- **Spotify's catalogue first** (Spotify): the exact release that played (single, album or compilation), its album artists, track number, release date, copyright, tempo (BPM), musical key and a 640 × 640 cover.
+- **Deezer** completes genre, ISRC and label — and gives Apple Music's tracks their album, track number, date and cover, matched on title, artist and length.
 - **Synced lyrics** from [LRCLIB](https://lrclib.net) written next to each track as `Artist - Title.lrc` (plain lyrics when no timing exists), read by foobar2000, MusicBee, Poweramp, Plexamp…
 - Folders by artist or artist / album, track or recording-order numbers, and tracks you already have are skipped — or replaced, or kept twice.
 
@@ -98,8 +100,8 @@
 
 - **How the check works**: an untouched lossless stream is made of exact 16- or 24-bit values, so any gain, resampling or effect shows on every sample. A track is *bit-perfect* when it is that exact stream, give or take the few hundred samples Spotify itself softens around a pause (at most 1 in 10,000).
 - **Before recording**, Resona warns about anything that would alter the sound: Spotify's volume below 100 % (one click sets it back), normalization, Automix, a quality other than Lossless, Windows audio enhancements, an output device not at 44.1 kHz.
-- **Virtual cable mode** (optional, [VB-Cable](https://vb-audio.com/Cable/)): Spotify plays silently into the cable, which Resona sets up by itself. Your headset's settings stop mattering, you can listen to something else — or have Resona play the recording back to you.
-- If Spotify adds a crossfade at a track change, Resona notices and tells you how to turn it off.
+- **Virtual cable mode** (optional, [VB-Cable](https://vb-audio.com/Cable/)): the app plays silently into the cable, which Resona sets up by itself (at 44.1 kHz for Spotify). Your headset's settings stop mattering, you can listen to something else — or have Resona play the recording back to you.
+- If the app adds a crossfade at a track change, Resona notices and tells you how to turn it off.
 
 ### ✨ And also
 
@@ -141,16 +143,19 @@
 
 - **Windows 11.** The per-process capture needs Windows build 20348 or later; Windows 10 is not supported.
 - **The Spotify desktop app**, logged in. The Microsoft Store version ships `spotify_cli`, which powers playlist mode, exact tags and the volume check; without it, recording still works.
+- **Or the Apple Music app** for Windows (Microsoft Store), with a subscription.
 
 ## Your first recording
 
-1. Open Spotify, then Resona.
-2. Either press **Start recording** and play anything in Spotify, or paste a playlist / album link and press **Record it**.
+1. Open Spotify or Apple Music, then Resona (pick the app in **Settings → Recording → Music app**).
+2. Either press **Start recording** and play anything, or, with Spotify, paste a playlist / album link and press **Record it**.
 3. Watch the badges: green means bit-perfect. Your files land in `Music\Resona` (change it in **Settings → Recording**).
 
 ## Get lossless recordings
 
-Resona tells you when something is off, but here is the whole checklist:
+Resona tells you when something is off, but here is the whole checklist.
+
+**Spotify**
 
 | Where | Setting |
 | --- | --- |
@@ -161,6 +166,18 @@ Resona tells you when something is off, but here is the whole checklist:
 | Windows | Output device format at **44,100 Hz** |
 
 Or turn on **Settings → Audio → Play Spotify through a virtual cable**: the two Windows lines then no longer apply.
+
+**Apple Music**
+
+| Where | Setting |
+| --- | --- |
+| Apple Music | Settings → Playback: **Lossless audio on** *and* **Streaming → Lossless** (the switch alone still streams AAC) |
+| Apple Music | **Volume at maximum** |
+| Apple Music | Sound Check, Sound Enhancer, **Crossfade** and **Dolby Atmos**: **off** |
+| Windows | Audio enhancements **off**, and any headset software equalizer (G HUB's *Advanced EQ*…) **off** |
+| Windows | Output device (or cable) format at **the track's rate**: 44,100 or 48,000 Hz, shown in Apple Music's *Lossless* badge |
+
+Apple Music does not change the device's rate by itself, and its catalogue mixes 44.1 and 48 kHz: a track at another rate than the device is still recorded, but labelled *altered*. Hi-Res Lossless (up to 192 kHz) has not been tested yet.
 
 > [!TIP]
 > Some tracks are limited or processed by Spotify itself; Resona labels them *peaks limited by Spotify* or *slightly changed by Spotify*. Nothing on your side can make those bit-perfect.
@@ -182,7 +199,7 @@ Spotify applies a limiter to some loud masters. The quiet parts are exact, the l
 <details>
 <summary><b>Every track says "altered". What did I miss?</b></summary>
 
-Look at the warnings at the top of the window: usually Spotify's volume below 100 %, normalization, a Windows audio enhancement, or the output device at 48 kHz. The virtual cable mode avoids the Windows side altogether.
+Look at the warnings at the top of the window: usually Spotify's volume below 100 %, normalization, a Windows audio enhancement, or the output device at 48 kHz. The virtual cable mode avoids the Windows side altogether. With Apple Music, check that it streams in Lossless (not AAC), that the device runs at the track's rate, and that no headset equalizer is on.
 </details>
 
 <details>
@@ -194,7 +211,7 @@ Playlist mode needs Spotify's bundled `spotify_cli.exe`. Run `spotify_cli status
 <details>
 <summary><b>Is this legal?</b></summary>
 
-Resona records the audio output, like any recorder plugged into the speakers, and does not circumvent Spotify's DRM. Recording may still be against Spotify's terms of use and your local law: keep the files for your own use.
+Resona records the audio output, like any recorder plugged into the speakers, and does not circumvent Spotify's or Apple's DRM. Recording may still be against their terms of use and your local law: keep the files for your own use.
 </details>
 
 ## Build from source
@@ -207,13 +224,14 @@ cargo test --workspace                                                 # tests
 cargo clippy --workspace --all-targets -- -D warnings                  # lint
 cargo packager --release -p resona                                     # installer (cargo install cargo-packager)
 cargo run -p resona-core --example capture_spotify -- 30 capture.flac  # capture + fidelity diagnostics
+cargo run -p resona-core --example apple_music_probe -- 30             # what Resona sees of Apple Music
 ```
 
 `RESONA_DEMO=session` (or `playlist`, `settings-0` … `settings-3`) fills the window with sample content for screenshots.
 
 | Crate | What it holds |
 | --- | --- |
-| [`crates/core`](crates/core) | The engine, no UI: Spotify detection, per-process capture, bit-perfect analysis, track splitting, FLAC / WAV / MP3 encoding, tags, lyrics, playlist sessions |
+| [`crates/core`](crates/core) | The engine, no UI: Spotify and Apple Music detection, per-process capture, bit-perfect analysis, track splitting, FLAC / WAV / MP3 encoding, tags, lyrics, playlist sessions |
 | [`crates/app`](crates/app) | The Slint interface, settings, notification area icon |
 
 Design notes and every measurement behind the choices are in [`docs/PLAN.md`](docs/PLAN.md).
@@ -223,7 +241,7 @@ Design notes and every measurement behind the choices are in [`docs/PLAN.md`](do
 - A Rust rewrite of [Spytify](https://github.com/jwallet/spy-spotify) by jwallet.
 - Lyrics from [LRCLIB](https://lrclib.net), extra tags from [Deezer](https://developers.deezer.com/api).
 - Interface by [Slint](https://slint.dev), audio through [wasapi-rs](https://github.com/HEnquist/wasapi-rs), FLAC by [libFLAC](https://xiph.org/flac/), tags by [lofty](https://github.com/Serial-ATA/lofty-rs).
-- Resona is not affiliated with, endorsed or sponsored by Spotify.
+- Resona is not affiliated with, endorsed or sponsored by Spotify or Apple.
 - Third-party licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), also installed next to `resona.exe`.
 
 <a href="https://slint.dev"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-dark.svg" /><img src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-light.svg" height="48" alt="Made with Slint" /></picture></a>

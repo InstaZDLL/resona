@@ -20,6 +20,7 @@ use windows::core::{HSTRING, Interface};
 
 use crate::Result;
 use crate::format::{CAPTURE_CHANNELS, CAPTURE_SAMPLE_RATE};
+use crate::provider::Provider;
 
 #[derive(Debug, Clone)]
 pub struct OutputDevice {
@@ -58,14 +59,18 @@ pub enum SetupIssue {
 }
 
 impl OutputDevice {
-    /// What to change in Windows for lossless captures; empty when the
-    /// device is set up right.
-    pub fn lossless_issues(&self) -> Vec<SetupIssue> {
+    /// What to change in Windows for lossless captures of `provider`; empty
+    /// when the device is set up right. Apple Music has no rate of its own
+    /// ([`Provider::fixed_rate`]): its tracks tell, one by one.
+    pub fn lossless_issues(&self, provider: Provider) -> Vec<SetupIssue> {
         let mut issues = Vec::new();
         if self.enhancements == Some(true) {
             issues.push(SetupIssue::Enhancements);
         }
-        if self.resamples() {
+        if provider
+            .fixed_rate()
+            .is_some_and(|rate| rate != self.sample_rate)
+        {
             issues.push(SetupIssue::SampleRate(self.sample_rate));
         }
         issues

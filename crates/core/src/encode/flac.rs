@@ -99,16 +99,18 @@ mod tests {
     use crate::encode::wav::CaptureWav;
 
     #[test]
-    fn encodes_a_24_bit_capture() {
+    fn encodes_a_24_bit_capture_at_its_own_rate() {
+        // 48 kHz: Apple Music's rate for many tracks, kept as is.
+        const RATE: u32 = 48_000;
         let dir = std::env::temp_dir().join(format!("resona-flac-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (wav_path, flac_path) = (dir.join("in.wav"), dir.join("out.flac"));
 
         // One second of a 24-bit-exact ramp, stereo.
-        let samples: Vec<f32> = (0..44_100 * 2)
+        let samples: Vec<f32> = (0..RATE as i32 * 2)
             .map(|i| ((i * 97) % 8_388_608 - 4_194_304) as f32 / 8_388_608.0)
             .collect();
-        let mut wav = CaptureWav::create(&wav_path).unwrap();
+        let mut wav = CaptureWav::create(&wav_path, RATE).unwrap();
         wav.write(&samples).unwrap();
         wav.finalize().unwrap();
 
@@ -122,7 +124,9 @@ mod tests {
         assert!(bytes.len() < samples.len() * 3 + 4096);
         // STREAMINFO must give players an exact duration for random access.
         let total_samples = u64::from_be_bytes(bytes[18..26].try_into().unwrap()) & ((1 << 36) - 1);
-        assert_eq!(total_samples, 44_100);
+        assert_eq!(total_samples, u64::from(RATE));
+        let reader = claxon::FlacReader::open(&flac_path).unwrap();
+        assert_eq!(reader.streaminfo().sample_rate, RATE);
 
         let decoded: Vec<i32> = claxon::FlacReader::open(&flac_path)
             .unwrap()

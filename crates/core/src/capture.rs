@@ -13,14 +13,14 @@ use std::time::Instant;
 use crossbeam_channel::{Receiver, Sender};
 use wasapi::{AudioClient, Direction, SampleType, StreamMode, WaveFormat};
 
-use crate::format::{CAPTURE_SAMPLE_RATE, front_stereo};
+use crate::format::front_stereo;
 use crate::{Error, Result};
 
 /// How long the capture thread blocks waiting for audio before checking
 /// the stop flag. Paused Spotify sends nothing or silence, by build.
 const EVENT_TIMEOUT_MS: u32 = 250;
 
-/// Interleaved stereo `f32` samples at [`CAPTURE_SAMPLE_RATE`].
+/// Interleaved stereo `f32` samples at [`CaptureConfig::sample_rate`].
 #[derive(Debug)]
 pub struct Packet {
     pub samples: Vec<f32>,
@@ -54,6 +54,9 @@ pub struct CaptureConfig {
     /// The device's speaker layout, so that no remapping between layouts
     /// happens either.
     pub channel_mask: u32,
+    /// Requested from Windows, which resamples to it if the process renders
+    /// at another rate. [`crate::format::CAPTURE_SAMPLE_RATE`] for Spotify.
+    pub sample_rate: u32,
 }
 
 impl ProcessCapture {
@@ -119,7 +122,7 @@ fn capture_thread(
         32,
         32,
         &SampleType::Float,
-        CAPTURE_SAMPLE_RATE as usize,
+        config.sample_rate as usize,
         usize::from(config.source_channels),
         Some(config.channel_mask),
     );

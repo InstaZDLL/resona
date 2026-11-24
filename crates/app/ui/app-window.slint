@@ -17,6 +17,8 @@ export struct TrackRow {
     reason: Reason,
     tagged: bool,
     format: string,
+    /// The app the track was recorded from, named in its badge.
+    player: string,
 }
 
 export enum Failure { other, spotify-not-running, spotify-cli-missing, spotify-command, not-a-link, list-not-started, lost-spotify, capture-not-started, unknown-track, cable-routing, headset-playback, encoding, default-device }
@@ -49,8 +51,8 @@ component QualityBadge inherits Rectangle {
             : root.track.reason == Reason.too-short ? @tr("too short")
             : @tr("already recorded"))
         : root.track.quality == Quality.bit-perfect ? @tr("bit-perfect {}-bit", root.track.depth)
-        : root.track.quality == Quality.near-transparent ? @tr("slightly changed by Spotify")
-        : root.track.quality == Quality.peak-limited ? @tr("peaks limited by Spotify")
+        : root.track.quality == Quality.near-transparent ? @tr("slightly changed by {}", root.track.player)
+        : root.track.quality == Quality.peak-limited ? @tr("peaks limited by {}", root.track.player)
         : root.track.quality == Quality.processed ? @tr("altered")
         : root.track.format;
     property <color> tint: root.track.state == TrackState.recording ? #e5484d
@@ -208,7 +210,11 @@ component Section inherits VerticalLayout {
 }
 
 export component AppWindow inherits Window {
-    // Spotify
+    // The music app recorded
+    /// Its name, shown in the texts: "Spotify" or "Apple Music".
+    in property <string> player: "Spotify";
+    /// Spotify's own tools are there: playlist mode, its settings.
+    in property <bool> spotify-tools: true;
     in property <SpotifyState> spotify-state: SpotifyState.not-running;
     in property <string> now-title;
     in property <string> now-artist;
@@ -234,6 +240,7 @@ export component AppWindow inherits Window {
     in property <int> missed-count;
 
     // Settings, written back by the panel
+    in-out property <int> provider-index;
     in-out property <string> output-dir;
     in-out property <int> quality-index: 2;
     in-out property <int> format-index;
@@ -263,21 +270,22 @@ export component AppWindow inherits Window {
     /// Makes the device `id` the Windows default again.
     callback restore-default-device(string);
     callback spotify-volume-max();
+    callback provider-changed(int);
     callback open-url(string);
 
     /// An error, worded in the interface's language. `subject`: what it is
     /// about (a track title), when anything.
     pure function problem-text(problem: Failure, subject: string) -> string {
-        return problem == Failure.spotify-not-running ? @tr("⚠ Spotify is not running: start it, then try again.")
+        return problem == Failure.spotify-not-running ? @tr("⚠ {} is not running: start it, then try again.", root.player)
             : problem == Failure.spotify-cli-missing ? @tr("⚠ Spotify's command-line tool (spotify_cli) is missing: playlist mode, exact tags and the volume check need a recent Spotify build.")
             : problem == Failure.spotify-command ? @tr("⚠ Spotify did not carry out the request.")
             : problem == Failure.not-a-link ? @tr("⚠ This is not a Spotify playlist, album or track link.")
             : problem == Failure.list-not-started ? @tr("⚠ Spotify did not start the playlist. Check that it is open and logged in, then try again.")
             : problem == Failure.lost-spotify ? @tr("⚠ Spotify stopped answering: the playlist was stopped.")
-            : problem == Failure.capture-not-started ? @tr("⚠ The capture did not start: is Spotify running on this computer?")
+            : problem == Failure.capture-not-started ? @tr("⚠ The capture did not start: is {} running on this computer?", root.player)
             : problem == Failure.unknown-track ? @tr("⚠ Spotify does not know this track.")
-            : problem == Failure.cable-routing ? @tr("⚠ Spotify could not be sent to the virtual cable: it stays on its device.")
-            : problem == Failure.headset-playback ? @tr("⚠ Spotify could not be played back on the headset.")
+            : problem == Failure.cable-routing ? @tr("⚠ {} could not be sent to the virtual cable: it stays on its device.", root.player)
+            : problem == Failure.headset-playback ? @tr("⚠ {} could not be played back on the headset.", root.player)
             : problem == Failure.encoding ? @tr("⚠ \"{}\" could not be saved.", subject)
             : problem == Failure.default-device ? @tr("⚠ The default output device could not be changed.")
             : @tr("⚠ Something went wrong.");
@@ -348,7 +356,7 @@ export component AppWindow inherits Window {
                     alignment: center;
                     spacing: 3px;
                     Text {
-                        text: root.spotify-state == SpotifyState.not-running ? @tr("Spotify is not running")
+                        text: root.spotify-state == SpotifyState.not-running ? @tr("{} is not running", root.player)
                             : root.spotify-state == SpotifyState.ad ? @tr("Advertisement")
                             : root.now-title == "" ? @tr("Nothing playing")
                             : root.now-title;
@@ -367,10 +375,10 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         Text {
                             text: root.spotify-state == SpotifyState.playing ? @tr("▶ Playing")
-                                : root.spotify-state == SpotifyState.paused ? (root.recording ? @tr("⏸ Paused: press play in Spotify") : @tr("⏸ Paused"))
+                                : root.spotify-state == SpotifyState.paused ? (root.recording ? @tr("⏸ Paused: press play in {}", root.player) : @tr("⏸ Paused"))
                                 : root.spotify-state == SpotifyState.ad ? @tr("Ad, not recorded")
-                                : root.spotify-state == SpotifyState.idle ? (root.recording ? @tr("Play something in Spotify") : @tr("Spotify is open"))
-                                : @tr("Start Spotify to record");
+                                : root.spotify-state == SpotifyState.idle ? (root.recording ? @tr("Play something in {}", root.player) : @tr("{} is open", root.player))
+                                : @tr("Start {} to record", root.player);
                             color: #6e6e73;
                             font-size: 12px;
                         }
@@ -400,13 +408,15 @@ export component AppWindow inherits Window {
                     color: notice.kind == Warning.error ? #a40000 : #8a4b00;
                     text: notice.kind == Warning.enhancements ? @tr("⚠ Windows audio enhancements may be on for \"{}\": recordings would not be lossless. Settings → Sound → that device → Audio enhancements → Off.", notice.device)
                         : notice.kind == Warning.sample-rate ? @tr("⚠ \"{}\" runs at {} Hz. Set it to 44100 Hz (Settings → Sound → that device → Format) for lossless recordings.", notice.device, notice.detail)
-                        : notice.kind == Warning.cable-missing ? @tr("⚠ No virtual cable installed: Spotify stays on its device. Install VB-Cable or turn the option off in the settings.")
-                        : notice.kind == Warning.spotify-fades ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                        : notice.kind == Warning.cable-missing ? @tr("⚠ No virtual cable installed: {} stays on its device. Install VB-Cable or turn the option off in the settings.", root.player)
+                        : notice.kind == Warning.spotify-fades ? (root.spotify-tools
+                            ? @tr("⚠ \"{}\" starts with a fade Spotify added: crossfade or Automix is on, and track changes are not lossless. Spotify → Settings → Playback → turn Crossfade and Automix off.", notice.detail)
+                            : @tr("⚠ \"{}\" starts with a fade Apple Music added: crossfade is on, and track changes are not lossless. Apple Music → Settings → Playback → Crossfade songs → off.", notice.detail))
                         : notice.kind == Warning.spotify-normalize ? @tr("⚠ Spotify's volume normalization is on: it changes the sound. Spotify → Settings → Playback → Normalize volume → off.")
                         : notice.kind == Warning.spotify-automix ? @tr("⚠ Spotify's Automix is on: it mixes the transitions of playlists. Spotify → Settings → Playback → Automix → off.")
                         : notice.kind == Warning.spotify-not-lossless ? @tr("⚠ Spotify does not stream in Lossless. Spotify → Settings → Audio quality → Lossless, or set the Spotify quality in Resona's settings.")
                         : notice.kind == Warning.cable-default ? @tr("⚠ The virtual cable is the Windows default output device: nothing can be heard.")
-                        : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of Spotify: {} (last: \"{}\"). Check Spotify's volume and the audio settings.", notice.device, notice.detail)
+                        : notice.kind == Warning.processed ? @tr("⚠ Tracks altered on their way out of {}: {} (last: \"{}\"). Check its volume and the audio settings.", root.player, notice.device, notice.detail)
                         : notice.kind == Warning.spotify-volume ? @tr("⚠ Spotify's volume is at {} %: recordings are scaled down and not lossless.", notice.detail)
                         : notice.kind == Warning.update ? @tr("Resona {} is available.", notice.device)
                         : notice.kind == Warning.error ? root.problem-text(notice.problem, notice.device) + (notice.detail == "" ? "" : " (" + notice.detail + ")")
@@ -443,7 +453,7 @@ export component AppWindow inherits Window {
         }
 
         // Playlist or album link
-        if !root.recording: HorizontalLayout {
+        if !root.recording && !root.finishing && root.spotify-tools: HorizontalLayout {
             spacing: 8px;
             LineEdit {
                 placeholder-text: @tr("Spotify playlist or album link");
@@ -499,7 +509,7 @@ export component AppWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    if !root.recording && root.missed-count > 0: Text {
+                    if !root.recording && !root.finishing && root.spotify-tools && root.missed-count > 0: Text {
                         text: @tr("Retry the {} missed", root.missed-count);
                         color: #0a84ff;
                         TouchArea {
@@ -611,6 +621,16 @@ export component AppWindow inherits Window {
                         if root.settings-tab == 0: Section {
                             title: @tr("Recording");
                             SettingRow {
+                                label: @tr("Music app");
+                                ComboBox {
+                                    model: ["Spotify", "Apple Music"];
+                                    current-index <=> root.provider-index;
+                                    enabled: !root.recording && !root.finishing;
+                                    horizontal-stretch: 1;
+                                    selected => { root.provider-changed(self.current-index); }
+                                }
+                            }
+                            SettingRow {
                                 label: @tr("Folder");
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -625,7 +645,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            SettingRow {
+                            if root.spotify-tools: SettingRow {
                                 label: @tr("Spotify quality");
                                 ComboBox {
                                     model: [@tr("Free (160 kbps)"), @tr("Premium (320 kbps)"), @tr("Lossless (FLAC)")];
@@ -695,7 +715,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             Option {
-                                text: @tr("Make Spotify skip tracks already recorded");
+                                text: @tr("Make {} skip tracks already recorded", root.player);
                                 enabled: root.existing-index == 0;
                                 checked <=> root.skip-in-spotify;
                                 toggled => { root.settings-changed(); }
@@ -711,7 +731,7 @@ export component AppWindow inherits Window {
                         if root.settings-tab == 2: Section {
                             title: @tr("Audio output");
                             Option {
-                                text: @tr("Play Spotify through a virtual cable");
+                                text: @tr("Play {} through a virtual cable", root.player);
                                 hint: root.cable-name == ""
                                     ? @tr("Install VB-Cable to isolate recordings from your headset settings.")
                                     : @tr("Records independently of your headset. Enable monitoring below to listen.");
@@ -720,7 +740,7 @@ export component AppWindow inherits Window {
                                 toggled => { root.settings-changed(); }
                             }
                             Option {
-                                text: @tr("Hear Spotify while recording");
+                                text: @tr("Hear {} while recording", root.player);
                                 enabled: root.virtual-cable;
                                 checked <=> root.listen;
                                 toggled => { root.settings-changed(); }
@@ -735,7 +755,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        if root.settings-tab == 2: Section {
+                        if root.settings-tab == 2 && root.spotify-tools: Section {
                             title: @tr("Ads (Spotify Free)");
                             Option {
                                 text: @tr("Mute Spotify during ads");
@@ -793,7 +813,9 @@ export component AppWindow inherits Window {
                             clicked => { root.show-audio-help = !root.show-audio-help; }
                         }
                         if root.settings-tab == 2 && root.show-audio-help: Text {
-                            text: @tr("For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect.");
+                            text: root.spotify-tools
+                                ? @tr("For lossless recordings: Spotify in Lossless quality, its volume at maximum, normalization, equalizer, crossfade and Automix off; Windows audio enhancements off and the output device at 44100 Hz. Each saved track says whether it came out bit-perfect.")
+                                : @tr("For lossless recordings: in Apple Music, Lossless audio on and Streaming set to Lossless, its volume at maximum, Sound Check, Sound Enhancer, crossfade and Dolby Atmos off; Windows audio enhancements and any headset equalizer off, and the output device at the track's rate (44100 or 48000 Hz, shown in Apple Music's Lossless badge). Each saved track says whether it came out bit-perfect.");
                             wrap: word-wrap;
                             color: #6e6e73;
                             font-size: 12px;

@@ -1,6 +1,6 @@
-//! Spotify's System Media Transport Controls session: what Windows shows in
-//! its media overlay. Gives album, album artist, track number and duration,
-//! which the window title does not.
+//! The app's System Media Transport Controls session: what Windows shows in
+//! its media overlay. For Spotify it adds album, album artist, track number
+//! and duration to the window title; for Apple Music it is the only source.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,6 +12,7 @@ use windows::Media::Control::{
 use windows::Storage::Streams::DataReader;
 
 use crate::Result;
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmtcSnapshot {
@@ -44,24 +45,24 @@ impl Smtc {
         })
     }
 
-    /// Asks Spotify to go to the next track, as its "next" button does.
-    /// Returns whether Spotify accepted.
-    pub fn skip_spotify(&self) -> Result<bool> {
+    /// Asks the app to go to the next track, as its "next" button does.
+    /// Returns whether it accepted.
+    pub fn skip(&self, provider: Provider) -> Result<bool> {
         for session in self.manager.GetSessions()? {
             let app_id = session.SourceAppUserModelId()?.to_string();
-            if app_id.to_ascii_lowercase().contains("spotify") {
+            if provider.matches_app_id(&app_id) {
                 return Ok(session.TrySkipNextAsync()?.join()?);
             }
         }
         Ok(false)
     }
 
-    /// The cover art Spotify gives Windows for the current track (JPEG or
+    /// The cover art the app gives Windows for the current track (JPEG or
     /// PNG bytes, 300 px for Spotify), if any.
-    pub fn spotify_thumbnail(&self) -> Result<Option<Vec<u8>>> {
+    pub fn thumbnail(&self, provider: Provider) -> Result<Option<Vec<u8>>> {
         for session in self.manager.GetSessions()? {
             let app_id = session.SourceAppUserModelId()?.to_string();
-            if !app_id.to_ascii_lowercase().contains("spotify") {
+            if !provider.matches_app_id(&app_id) {
                 continue;
             }
             let properties = session.TryGetMediaPropertiesAsync()?.join()?;
@@ -82,11 +83,11 @@ impl Smtc {
         Ok(None)
     }
 
-    /// Spotify's session, if Spotify registered one.
-    pub fn spotify(&self) -> Result<Option<SmtcSnapshot>> {
+    /// The app's session, if it registered one.
+    pub fn session(&self, provider: Provider) -> Result<Option<SmtcSnapshot>> {
         for session in self.manager.GetSessions()? {
             let app_id = session.SourceAppUserModelId()?.to_string();
-            if !app_id.to_ascii_lowercase().contains("spotify") {
+            if !provider.matches_app_id(&app_id) {
                 continue;
             }
             let properties = session.TryGetMediaPropertiesAsync()?.join()?;
